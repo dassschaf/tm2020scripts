@@ -59,39 +59,11 @@
     MB_LogVersion(ScriptName, Version);
 ***
 
-/// Load HUD
-***Match_LoadHud***
-***
-    ClientManiaAppUrl = C_ManiaAppUrl;
-    Hud_Load(C_HudModulePath);
-    MB_SortScores(CTmMode::ETmScoreSortOrder::BestRace_Time);
-
-    // Initialize UI modules
-    UI::LoadModules([
-        UIModules::C_Module_TimeGap, 
-        UIModules::C_Module_Chrono,
-        UIModules::C_Module_CheckpointTime,
-        UIModules::C_Module_PrevBestTime,
-        UIModules::C_Module_SpeedAndDistance,
-        UIModules::C_Module_Countdown,
-        UIModules::C_Module_Laps,
-        UIModules::C_Module_MapInfo,
-        UIModules::C_Module_MapRanking,
-        UIModules::C_Module_LiveInfo,
-        UIModules::C_Module_SpectatorInfo,
-        UIModules::C_Module_ViewersCount
-    ]);
-    UI::SetTimeGapMode("BestRace");
-    UI::SetCheckpointTimeMode("BestRace");
-***
-
 /// on Server start
 ***Match_StartServer***
 ***
     // Initialize Gamemode
     RespawnBehaviour::Set(CSmMode::ERespawnBehaviour::AlwaysRespawn);
-
-
 ***
 
 /// on Map Start
