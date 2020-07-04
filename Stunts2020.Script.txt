@@ -1,0 +1,136 @@
+/**
+ *
+ * Stunts for TrackMania 2020
+ *
+ * written by dassschaf / UD Timmy
+ *
+ */
+
+
+/**
+ *	Interesting Information for stunt mode: 
+ *	* CSmPlayer class
+ *	see: https://maniascript.boss-bravo.fr/class_c_sm_player.html
+ *	* CSmPlayer->InputSteer
+ *	* CSmPlayer->WheelsContactGround
+ *  * CSmPlayer->FlyingDistance
+ *  * CSmPlayer->Upwardness???
+ *  * CSmPlayer->AimDirection
+ *  * CSmPlayer->Velocity
+ *
+ *  * CSmPlayer->Vehicle (Type: CModeVehicle)
+ *	see: https://maniascript.boss-bravo.fr/class_c_mode_vehicle.html
+ */
+
+// Extends base mode script of TM 2020:
+#Extends "Modes/ModeBase2.Script.txt"
+#RequireContext CSmMode
+
+// ---------------------------------- //
+// Script Info
+#Const	CompatibleMapTypes	"TrackMania\\TM_Race"
+#Const  Version     		"0"
+#Const  ScriptName  		"Stunts2020.Script.txt"
+
+// ---------------------------------- //
+// Libraries
+
+#Include "MathLib" as MathLib
+#Include "TextLib" as TextLib
+
+#Include "Libs/Nadeo/Interface.Script.txt" as Interface
+
+// ---------------------------------- //
+// Settings
+
+#Setting S_TimeLimit 300 as _("Time Limit:")
+
+// ---------------------------------- //
+// Constants
+
+#Const C_MasterModifier 2.0
+
+// ---------------------------------- //
+// Extends
+
+/// LogVersion
+***Match_LogVersion***
+***
+    MB_LogVersion(ScriptName, Version);
+***
+
+/// Load HUD
+***Match_LoadHud***
+***
+    ClientManiaAppUrl = C_ManiaAppUrl;
+    Hud_Load(C_HudModulePath);
+    MB_SortScores(CTmMode::ETmScoreSortOrder::BestRace_Time);
+
+    // Initialize UI modules
+    UI::LoadModules([
+        UIModules::C_Module_TimeGap, 
+        UIModules::C_Module_Chrono,
+        UIModules::C_Module_CheckpointTime,
+        UIModules::C_Module_PrevBestTime,
+        UIModules::C_Module_SpeedAndDistance,
+        UIModules::C_Module_Countdown,
+        UIModules::C_Module_Laps,
+        UIModules::C_Module_MapInfo,
+        UIModules::C_Module_MapRanking,
+        UIModules::C_Module_LiveInfo,
+        UIModules::C_Module_SpectatorInfo,
+        UIModules::C_Module_ViewersCount
+    ]);
+    UI::SetTimeGapMode("BestRace");
+    UI::SetCheckpointTimeMode("BestRace");
+***
+
+/// on Server start
+***Match_StartServer***
+***
+    // Initialize Gamemode
+    RespawnBehaviour::Set(CSmMode::ERespawnBehaviour::AlwaysRespawn);
+
+
+***
+
+/// on Map Start
+***Match_InitMap***
+***
+    // Map initialization
+    yield;
+***
+
+***Match_StartMap***
+***
+    // Map actual start
+    yield;
+***
+
+/// on Turn Start
+***Match_InitTurn***
+***
+    // Turn initialitzation
+    yield;
+***
+
+***Match_StartTurn***
+***
+    // Turn start
+    ModeStatusMessage = "Current map : "^Map.MapInfo.Name;
+***
+
+/// Play loop
+***Match_PlayLoop***
+***
+    // actual game mechanics?!
+    foreach (Player in Players) {
+        
+    }
+
+***
+
+
+// ---------------------------------- //
+// Own functions
+
