@@ -6,21 +6,10 @@
  *
  */
 
-
-/**
- *	Interesting Information for stunt mode: 
- *	* CSmPlayer class
- *	see: https://maniascript.boss-bravo.fr/class_c_sm_player.html
- *	* CSmPlayer->InputSteer
- *	* CSmPlayer->WheelsContactGround
- *  * CSmPlayer->FlyingDistance
- *  * CSmPlayer->Upwardness???
- *  * CSmPlayer->AimDirection
- *  * CSmPlayer->Velocity
- *
- *  * CSmPlayer->Vehicle (Type: CModeVehicle)
- *	see: https://maniascript.boss-bravo.fr/class_c_mode_vehicle.html
- */
+// Notice:
+// Wheras TM2/Maniaplanet offered a special event that could be handled that would return the jump type rightaway, TM2020 lacks this. Therefore I'm not sure if the gamemode can be written in a manner stunts can be still properly ordered into their types.
+// Jump type determination requires figuring out the rotations by the sinus-alike output of Player.Aim.X/Y/Z
+// Nadeo please :(
 
 // Extends base mode script of TM 2020:
 #Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextBase.Script.txt"
@@ -46,6 +35,7 @@
 // #Setting S_NAME VALUE as _("TEXT")
 
 #Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
+#Setting S_ShowDebugInfo True as _("Show Debug info")
 
 // ---------------------------------- //
 // Constants
@@ -134,14 +124,64 @@ declare Integer[Text] G_Scores;
 ***Match_PlayLoop***
 ***
     // actual game mechanics?!
-    foreach (Player in Players) {
-        declare Text MLDebugInfo;
 
-        // get debug info for the player
-        Layers::Create("MLDebugInfo", MLDebugInfo);
-        Layers::SetType("MLDebugInfo", CUILayer::EUILayerType::Normal);
-        Layers::Attach("MLDebugInfo", Player);
+    // ------------------
+    // Player phsyics debug info
+    foreach (Player in Players) {
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::Spawned  && S_ShowDebugInfo) {
+            declare Text ManialinkDebugInfo;
+
+            declare Real InputSteer = Player.InputSteer;
+            declare Integer FlyingDuration = Player.FlyingDuration;
+            declare Real FlyingDistance = Player.FlyingDistance;
+            declare Integer WheelsContactCount = Player.WheelsContactCount;
+            declare Boolean IsTouchingGround = Player.IsTouchingGround;
+            declare Real Upwardness = Player.Upwardness;
+            declare Real PosX = Player.Position.X;
+            declare Real PosY = Player.Position.Y;
+            declare Real PosZ = Player.Position.Z;
+            declare Real AimX = Player.AimDirection.X;
+            declare Real AimY = Player.AimDirection.Y;
+            declare Real AimZ = Player.AimDirection.Z;
+            //declare CModeVehicle Vehicle <=> Player.Vehicle;
+            //declare Real Pitch = Vehicle.Pitch;
+            //declare Real Roll = Vehicle.Roll;
+
+            ManialinkDebugInfo = """
+            <label pos="0 1" z-index="0" 
+            text="
+            Steer: {{{InputSteer}}}
+            Fly Duration: {{{FlyingDuration}}}
+            Fly Distance: {{{FlyingDistance}}}
+            On Ground? {{{IsTouchingGround}}}
+            #Wheels: {{{WheelsContactCount}}}
+            Upwardness: {{{Upwardness}}}
+            Coordinates: X={{{PosX}}}, Y={{{PosY}}}, Z={{{PosZ}}}
+            Aim Direction: X={{{AimX}}}, Y={{{AimY}}}, Z={{{AimZ}}}
+            "/>
+            """;
+
+            // get debug info for the player
+            Layers::Create("ManialinkDebugInfo", ManialinkDebugInfo);
+            Layers::SetType("ManialinkDebugInfo", CUILayer::EUILayerType::Normal);
+            Layers::Attach("ManialinkDebugInfo", Player);
+        }
     }
+
+    // ------------------
+    // Pending Events Handler
+    foreach (Event in PendingEvents) {
+        
+    }
+
+    // -------------------
+    // Manage Player Respawning
+    foreach (Player in Players) {
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
+            Race::Start(Player);
+    }
+
+
 
 ***
 
