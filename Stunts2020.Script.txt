@@ -39,7 +39,7 @@
 #Include "MathLib" as MathLib
 #Include "TextLib" as TextLib
 
-#Include "Libs/Nadeo/Interface.Script.txt" as Interface
+#Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
 
 // ---------------------------------- //
 // Settings
@@ -50,70 +50,101 @@
 // ---------------------------------- //
 // Constants
 // #Const C_NAME VALUE
+#Const C_UploadRecord False
+
+// ---------------------------------- //
+// Global variables
+declare Integer[Text] G_Scores;
 
 
 // ---------------------------------- //
 // Extends
 
-/// LogVersion
 ***Match_LogVersion***
 ***
+    // register the script to the log
     Log::RegisterScript(ScriptName, Version);
-***
+*** // Match_LogVersion
+
+
 
 ***Match_Rules***
 ***
-    // define Game Mode information:
+    // register game mode information
     ModeInfo::SetName(C_ModeName);
     ModeInfo::SetType(ModeInfo::C_Type_FreeForAll);
     ModeInfo::SetRules(Description);
     ModeInfo::SetStatusMessage(_("TYPE: Free for all\nOBJECTIVE: Set the best score on the track."));
-***
 
-/// on Server start
+*** // Match_Rules
+
+
+
 ***Match_StartServer***
 ***
+    
     // Initialize Gamemode
-    RespawnBehaviour::Set(CSmMode::ERespawnBehaviour::AlwaysRespawn); ///< allow respawn even in start
-***
+    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_NeverGiveUp);
+*** // Match_StartServer
 
-/// on Map Start
+
+
 ***Match_InitMap***
 ***
     // Map initialization
+    G_Scores.clear();
     yield;
-***
+
+*** // Match_InitMap
+
+
 
 ***Match_StartMap***
 ***
     // Map actual start
-    yield;
-***
 
-/// on Turn Start
+
+    // Start players for the race
+    foreach (Player in Players) {
+        Race::Start(Player);
+    }
+
+*** // Match_StartMap
+
+
+
 ***Match_InitTurn***
 ***
     // Turn initialitzation
     yield;
-***
+
+*** // Match_InitTurn
+
+
 
 ***Match_StartTurn***
 ***
     // Turn start
     ModeStatusMessage = "Current map : "^Map.MapInfo.Name;
-***
 
-/// Play loop
+*** // Match_StartTurn
+
+
+
 ***Match_PlayLoop***
 ***
     // actual game mechanics?!
     foreach (Player in Players) {
-        
+        declare Text MLDebugInfo;
+
+        // get debug info for the player
+        Layers::Create("MLDebugInfo", MLDebugInfo);
+        Layers::SetType("MLDebugInfo", CUILayer::EUILayerType::Normal);
+        Layers::Attach("MLDebugInfo", Player);
     }
 
 ***
 
-
-// ---------------------------------- //
-// Own functions
-
+// this somehow prevents an EOF error?
+Void dummy() {
+}
