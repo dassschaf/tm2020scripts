@@ -23,14 +23,15 @@
  */
 
 // Extends base mode script of TM 2020:
-#Extends "Modes/ModeBase2.Script.txt"
-#RequireContext CSmMode
+#Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextBase.Script.txt"
 
 // ---------------------------------- //
 // Script Info
-#Const	CompatibleMapTypes	"TrackMania\\TM_Race"
+#Const	CompatibleMapTypes	"TrackMania\\TM_Race,TM_Race"
 #Const  Version     		"0"
 #Const  ScriptName  		"Stunts2020.Script.txt"
+#Const  C_ModeName          "Stunts2020"
+#Const  Description         _("In $<$6f9Stunt mode$>, the goal is to make as much points by tricks in the air as possible before the time is over. Finishing too late and respawning cause point deduction. The winner is the player with the highest score. \n This mode is inspired by the original Stunt mode known from TM 1 or Spaii's stunts titlepack for TM 2.")
 
 // ---------------------------------- //
 // Libraries
@@ -42,13 +43,14 @@
 
 // ---------------------------------- //
 // Settings
+// #Setting S_NAME VALUE as _("TEXT")
 
-#Setting S_TimeLimit 300 as _("Time Limit:")
+#Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
 
 // ---------------------------------- //
 // Constants
+// #Const C_NAME VALUE
 
-#Const C_MasterModifier 2.0
 
 // ---------------------------------- //
 // Extends
@@ -56,14 +58,23 @@
 /// LogVersion
 ***Match_LogVersion***
 ***
-    MB_LogVersion(ScriptName, Version);
+    Log::RegisterScript(ScriptName, Version);
+***
+
+***Match_Rules***
+***
+    // define Game Mode information:
+    ModeInfo::SetName(C_ModeName);
+    ModeInfo::SetType(ModeInfo::C_Type_FreeForAll);
+    ModeInfo::SetRules(Description);
+    ModeInfo::SetStatusMessage(_("TYPE: Free for all\nOBJECTIVE: Set the best score on the track."));
 ***
 
 /// on Server start
 ***Match_StartServer***
 ***
     // Initialize Gamemode
-    RespawnBehaviour::Set(CSmMode::ERespawnBehaviour::AlwaysRespawn);
+    RespawnBehaviour::Set(CSmMode::ERespawnBehaviour::AlwaysRespawn); ///< allow respawn even in start
 ***
 
 /// on Map Start
