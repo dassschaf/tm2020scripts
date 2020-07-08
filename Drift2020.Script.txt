@@ -1,0 +1,277 @@
+/**
+ *
+ * Drifting for TrackMania 2020
+ *
+ * written by dassschaf / UD Timmy
+ *
+ */
+
+// Extends base mode script of TM 2020:
+#Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextBase.Script.txt"
+
+// ---------------------------------- //
+// Script Info
+#Const	CompatibleMapTypes	"TrackMania\\TM_Race,TM_Race"
+#Const  Version     		"0"
+#Const  ScriptName  		"Drift2020.Script.txt"
+#Const  C_ModeName          "Drift2020"
+#Const  Description         _("In $<$Drift mode$>, the goal is to make as much points as possible through drifting over the track. The higher your angle of attack and speed are, the higher the points you gain. The winner is the player with most points at the end of the round.")
+
+// ---------------------------------- //
+// Libraries
+
+#Include "MathLib" as MathLib
+#Include "TextLib" as TextLib
+
+#Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
+
+// ---------------------------------- //
+// Settings
+// #Setting S_NAME VALUE as _("TEXT")
+
+#Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
+#Setting S_ShowDebugInfo True as _("Show Debug info")
+
+// ---------------------------------- //
+// Constants
+// #Const C_NAME VALUE
+#Const C_UploadRecord False
+#Const C_DriftFactor 0.1
+
+// ---------------------------------- //
+// Global variables
+declare Text[] G_Players; ///< used to figure out indices for G_Scores
+declare Real[] G_Scores; 
+declare Boolean[] G_IsSkidding;
+declare Real[] G_CurrentSkidScore;
+
+
+// ---------------------------------- //
+// Extends
+
+***Match_LogVersion***
+***
+    // register the script to the log
+    Log::RegisterScript(ScriptName, Version);
+*** // Match_LogVersion
+
+
+
+***Match_Rules***
+***
+    // register game mode information
+    ModeInfo::SetName(C_ModeName);
+    ModeInfo::SetType(ModeInfo::C_Type_FreeForAll);
+    ModeInfo::SetRules(Description);
+    ModeInfo::SetStatusMessage(_("TYPE: Free for all\nOBJECTIVE: Set the best score on the track."));
+
+*** // Match_Rules
+
+
+
+***Match_StartServer***
+***
+    
+    // Initialize Gamemode
+    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_NeverGiveUp);
+*** // Match_StartServer
+
+
+
+***Match_InitMap***
+***
+    // Map initialization
+    G_Scores.clear();
+    G_Players.clear();
+    G_IsSkidding.clear();
+    G_CurrentSkidScore.clear();
+
+    foreach (Player in Players) {
+        G_Players.add(Player.User.Login); ///< nth element
+        G_Scores.add(0.0); ///< nth login has nth score
+        G_CurrentSkidScore.add(0.0);
+        G_IsSkidding.add(False);
+    }
+
+*** // Match_InitMap
+
+
+
+***Match_StartMap***
+***
+    // Map actual start
+
+
+    // Start players for the race
+    foreach (Player in Players) {
+        Race::Start(Player);
+    }
+
+*** // Match_StartMap
+
+
+
+***Match_InitTurn***
+***
+    // Turn initialitzation
+    yield;
+
+*** // Match_InitTurn
+
+
+
+***Match_StartTurn***
+***
+    // Turn start
+    ModeStatusMessage = "Current map : "^Map.MapInfo.Name;
+
+*** // Match_StartTurn
+
+
+
+***Match_PlayLoop***
+***
+    // actual game mechanics?!
+
+    // ------------------
+    // Pending Events Handler
+    foreach (Event in PendingEvents) {
+        CSmPlayer Player <=> Event.Player;
+        declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
+
+        switch (Event.Type) {
+            case CSmModeEvent::EType::OnPlayerAdded: {
+                
+                G_Players.add(Player.User.Login); ///< nth element
+                G_Scores.add(0.0); ///< nth login has nth score
+                G_CurrentSkidScore.add(0.0);
+                G_IsSkidding.add(False);
+            }
+
+            case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+                if (Event.IsFinish || Event.IsNewLap) {
+                    // player passed finish line, score handling here
+                }
+            }
+
+            case CSmModeEvent::EType::OnPlayerRequestRespawn: {
+                // player respawns
+
+                // reset ongoing skid
+                G_CurrentSkidScore[PlayerIndex] = 0;
+                G_IsSkidding[PlayerIndex] = False;
+
+                // deduct penalty points
+                G_Scores[PlayerIndex] -= 500;
+                if (G_Scores[PlayerIndex] < 0)
+                    G_Scores[PlayerIndex] = 0;
+            }
+        }
+    }
+
+    // ------------------
+    // Manage per-player actions
+    foreach (Player in Players) {
+        declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
+
+        // respawn player if unspawned
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
+            Race::Start(Player);
+
+        // score calculation
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::Spawned) {
+            
+
+            // fetch skidding information
+            declare Integer SkiddingDuration = Player.SkiddingDuration;
+            declare Real SkiddingDistance = Player.SkiddingDistance;
+            declare Integer WheelsSkiddingCount = Player.WheelsSkiddingCount;
+            declare Integer WheelsContactCount = Player.WheelsContactCount;
+            declare Real Speed = Player.Speed;
+            
+            // score factors
+            // + C_DriftFactor
+            declare Real SkidAngle;
+            declare Real Points;
+            
+
+            // score checking
+            // check if not airborne
+            if (WheelsContactCount >= 2 && WheelsSkiddingCount >= 2 {
+                SkidAngle = MathLib::Abs(MathLib::OrientedAngle(Player.Velocity, Player.AimDirection));
+
+                // Check for sufficient skid angle
+                if (SkidAngle > 0.1) {
+                    // car is skidding, calculate points
+                    G_IsSkidding[PlayerIndex] = True;
+                    Points = SkidAngle*Speed*C_DriftFactor;
+                    G_CurrentSkidScore[PlayerIndex] += Points;
+                
+                } else {
+                    // car is not skidding
+                    // add skid score to total score
+                    if (G_IsSkidding[PlayerIndex])
+                        G_Scores[PlayerIndex] += G_CurrentSkidScore[PlayerIndex];
+                        
+                    // reset values
+                    G_CurrentSkidScore[PlayerIndex] = 0;
+                    G_IsSkidding[PlayerIndex] = False;
+                }
+    
+            } else {
+
+                // car does not qualify for skidding, car airborne
+                if (G_IsSkidding[PlayerIndex])
+                    G_Scores[PlayerIndex] += G_CurrentSkidScore[PlayerIndex];
+                
+                // reset values
+                G_CurrentSkidScore[PlayerIndex] = 0;
+                G_IsSkidding[PlayerIndex] = False;
+                SkidAngle = 0.0;
+                Points = 0.0;
+            }
+
+            if (S_ShowDebugInfo) {
+                // car velocity
+                declare Real VelX = Player.Velocity.X;
+                declare Real VelY = Player.Velocity.Y;
+                declare Real VelZ = Player.Velocity.Z;
+
+                // car direction
+                declare Real AimX = Player.AimDirection.X;
+                declare Real AimY = Player.AimDirection.Y;
+                declare Real AimZ = Player.AimDirection.Z;
+
+                // player input
+                declare Real InputSteer = Player.InputSteer;
+
+                declare Text ManialinkDebugInfo;
+                ManialinkDebugInfo = """
+                <label pos="0 1" z-index="0" 
+                text="
+                Skidding? {{{G_IsSkidding[PlayerIndex]}}}
+                Skid Duration: {{{SkiddingDuration}}}
+                Skid Distance: {{{SkiddingDistance}}}
+                Skid Wheels # {{{WheelsSkiddingCount}}}
+                Vel Direction: X={{{VelX}}}, Y={{{VelY}}}, Z={{{VelZ}}}
+                Car Direction: X={{{AimX}}}, Y={{{AimY}}}, Z={{{AimZ}}}
+                Skid Angle: {{{SkidAngle}}}
+                Points: {{{Points}}}
+                Skid Points: {{{G_CurrentSkidScore[PlayerIndex]}}}
+                Total Points: {{{G_Scores[PlayerIndex]}}}
+                "/>
+                """;
+
+                // get debug info for the player
+                Layers::Create("ManialinkDebugInfo", ManialinkDebugInfo);
+                Layers::SetType("ManialinkDebugInfo", CUILayer::EUILayerType::Normal);
+                Layers::Attach("ManialinkDebugInfo", Player);
+            }
+        }
+    }
+
+***
+
+// this somehow prevents an EOF error?
+Void dummy() {
+}
