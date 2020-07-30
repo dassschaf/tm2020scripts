@@ -19,18 +19,24 @@
 
 // ---------------------------------- //
 // Libraries
-
+//
+// Utility libraries:
 #Include "MathLib" as MathLib
 #Include "TextLib" as TextLib
 
+// Various libraries:
 #Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
+
+// UI-Modules:
+#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/ScoresTable_Server.Script.txt" as UIModules_ScoresTable
 
 // ---------------------------------- //
 // Settings
 // #Setting S_NAME VALUE as _("TEXT")
 
-#Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
-#Setting S_ShowDebugInfo True as _("Show Debug info")
+#Setting S_TimeLimit            300         as _("Time Limit:")
+#Setting S_ShowDebugInfo        True        as _("Show Debug info")
+#Setting S_EnableCollisions     True        as _("Enable Car Collisions")
 
 // ---------------------------------- //
 // Constants
@@ -72,6 +78,10 @@ declare Real[] G_CurrentSkidScore;
 ***
     // Initialize Gamemode
     Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_GiveUpBeforeFirstCheckpoint);
+    
+    // Gamemode settings
+    UsePvPCollisions = S_EnableCollisions;
+
 
 *** // Match_StartServer
 
@@ -139,6 +149,7 @@ declare Real[] G_CurrentSkidScore;
         declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
 
         switch (Event.Type) {
+            // Player joins game:
             case CSmModeEvent::EType::OnPlayerAdded: {
                 
                 G_Players.add(Player.User.Login); ///< nth element
@@ -147,6 +158,7 @@ declare Real[] G_CurrentSkidScore;
                 G_IsSkidding.add(False);
             }
 
+            // Player traverses finish or lap
             case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
                 if (Event.IsFinish || Event.IsNewLap) {
                     // player passed finish line, score handling here
@@ -163,6 +175,7 @@ declare Real[] G_CurrentSkidScore;
                 }
             }
 
+            // Player requests respawn
             case CSmModeEvent::EType::OnPlayerRequestRespawn: {
                 // player respawns
 
@@ -174,6 +187,24 @@ declare Real[] G_CurrentSkidScore;
                 G_Scores[PlayerIndex] -= 500;
                 if (G_Scores[PlayerIndex] < 0)
                     G_Scores[PlayerIndex] = 0;
+            }
+
+            // Player's Vehicle collides
+            case CSmModeEvent::EType::OnVehicleCollision: {
+                // on vehicle collision
+
+                // reset ongoing skid
+                G_CurrentSkidScore[PlayerIndex] = 0.;
+                G_IsSkidding[PlayerIndex] = False;
+            }
+
+            // Player's Vehicle collides with another Vehicle
+            case CSmModeEvent::EType::OnVehicleVsVehicleCollision: {
+                // on vehicle-vehicle collision between players
+
+                // reset ongoing skid
+                G_CurrentSkidScore[PlayerIndex] = 0.;
+                G_IsSkidding[PlayerIndex] = False;
             }
         }
 
@@ -299,5 +330,7 @@ declare Real[] G_CurrentSkidScore;
 ***
 
 // this somehow prevents an EOF error?
-Void dummy() {
+Void Nothing()
+{
+    // does nothing.
 }
