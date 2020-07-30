@@ -36,16 +36,17 @@
 
 #Setting S_TimeLimit            300         as _("Time Limit:")
 #Setting S_ShowDebugInfo        True        as _("Show Debug info")
-#Setting S_EnableCollisions     True        as _("Enable Car Collisions")
+#Setting S_EnableCollisions     True        as _("Enable Collisions between cars")
+#Setting S_RespawnPenalty       500         as _("Respawn Penalty in pts")
 
 // ---------------------------------- //
 // Constants
 // #Const C_NAME VALUE
-#Const C_UploadRecord False
+#Const C_UploadRecord False //< idk
 
 // ---------------------------------- //
 // Global variables
-declare Text[] G_Players; ///< used to figure out indices for G_Scores
+declare Text[] G_Players; ///< used to figure out indices for G_Scores -- maybe replace with associative arrays?
 declare Integer[] G_Scores; 
 declare Boolean[] G_IsSkidding;
 declare Real[] G_CurrentSkidScore;
@@ -81,6 +82,7 @@ declare Real[] G_CurrentSkidScore;
     
     // Gamemode settings
     UsePvPCollisions = S_EnableCollisions;
+    UseGuns = True; //< I just wanna see what happens
 
 
 *** // Match_StartServer
@@ -96,9 +98,9 @@ declare Real[] G_CurrentSkidScore;
     G_CurrentSkidScore.clear();
 
     foreach (Player in Players) {
-        G_Players.add(Player.User.Login); ///< nth element
-        G_Scores.add(0); ///< nth login has nth score
-        G_CurrentSkidScore.add(0.0);
+        G_Players.add(Player.User.Login);   ///< nth element
+        G_Scores.add(0);                    ///< nth login has nth score
+        G_CurrentSkidScore.add(0.0);        ///< etc.
         G_IsSkidding.add(False);
     }
 
@@ -180,13 +182,7 @@ declare Real[] G_CurrentSkidScore;
                 // player respawns
 
                 // reset ongoing skid
-                G_CurrentSkidScore[PlayerIndex] = 0.;
-                G_IsSkidding[PlayerIndex] = False;
-
-                // deduct penalty points
-                G_Scores[PlayerIndex] -= 500;
-                if (G_Scores[PlayerIndex] < 0)
-                    G_Scores[PlayerIndex] = 0;
+                ResetOngoingSkid(PlayerIndex, S_RespawnPenalty);
             }
 
             // Player's Vehicle collides
@@ -194,8 +190,7 @@ declare Real[] G_CurrentSkidScore;
                 // on vehicle collision
 
                 // reset ongoing skid
-                G_CurrentSkidScore[PlayerIndex] = 0.;
-                G_IsSkidding[PlayerIndex] = False;
+                ResetOngoingSkid(PlayerIndex, 0);
             }
 
             // Player's Vehicle collides with another Vehicle
@@ -203,8 +198,7 @@ declare Real[] G_CurrentSkidScore;
                 // on vehicle-vehicle collision between players
 
                 // reset ongoing skid
-                G_CurrentSkidScore[PlayerIndex] = 0.;
-                G_IsSkidding[PlayerIndex] = False;
+                ResetOngoingSkid(PlayerIndex, 0);
             }
         }
 
@@ -216,20 +210,18 @@ declare Real[] G_CurrentSkidScore;
     foreach (Player in Players) {
         declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
 
-        // respawn player if unspawned
-        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
-        {   
-            // start race
+        // re-spawning
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned) {   
+            // spawn player
             Race::Start(Player);
         
             // reset skid stats
             G_Scores[PlayerIndex] = 0;
-            G_CurrentSkidScore[PlayerIndex] = 0.;
-            G_IsSkidding[PlayerIndex] = False;
+            ResetOngoingSkid(PlayerIndex, 0);
         }
+
         // score calculation
         if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::Spawned) {
-            
 
             // fetch skidding information
             declare Integer SkiddingDuration = Player.SkiddingDuration;
@@ -238,12 +230,9 @@ declare Real[] G_CurrentSkidScore;
             declare Integer WheelsContactCount = Player.WheelsContactCount;
             declare Real Speed = Player.Speed;
             
-            // score factors
-            // + C_DriftFactor
-            declare Real SkidAngle;
+            // score relevant information
+            declare Real SkidAngle; //<- radians, 3.14 == 180° turned skiddderidoo
             declare Real Points;
-            declare Real LengthBonus;
-            
 
             // score checking
             // check if not airborne
@@ -251,10 +240,12 @@ declare Real[] G_CurrentSkidScore;
                 SkidAngle = MathLib::Abs(MathLib::OrientedAngle(Player.Velocity, Player.AimDirection));
 
                 // Check for sufficient skid angle and speed (m/s)
-                if (SkidAngle > 0.1 && Speed > 12 || WheelsSkiddingCount > 0) {
+                // if the car's angle between velocity and aim vector is HIGHER than 135° it is not a valid drift
+                // to prevent driving backwards as meta strategy
+                if (SkidAngle > 0.1 && SkidAngle < 2.35 && Speed > 12 || WheelsSkiddingCount > 0 && SkidAngle < 2.35) {
                     // car is skidding, calculate points
                     G_IsSkidding[PlayerIndex] = True;
-                    Points = SkidAngle*Speed*0.05;
+                    Points = SkidAngle * Speed * 0.05;
                     G_CurrentSkidScore[PlayerIndex] += Points;
                 
                 } else {
@@ -264,8 +255,7 @@ declare Real[] G_CurrentSkidScore;
                         G_Scores[PlayerIndex] += MathLib::NearestInteger(G_CurrentSkidScore[PlayerIndex]);
                         
                     // reset values
-                    G_CurrentSkidScore[PlayerIndex] = 0.;
-                    G_IsSkidding[PlayerIndex] = False;
+                    ResetOngoingSkid(PlayerIndex, 0);
                 }
     
             } else {
@@ -275,8 +265,7 @@ declare Real[] G_CurrentSkidScore;
                     G_Scores[PlayerIndex] += MathLib::NearestInteger(G_CurrentSkidScore[PlayerIndex]);
                 
                 // reset values
-                G_CurrentSkidScore[PlayerIndex] = 0.;
-                G_IsSkidding[PlayerIndex] = False;
+                ResetOngoingSkid(PlayerIndex, 0);
                 SkidAngle = 0.0;
                 Points = 0.0;
             }
@@ -295,9 +284,7 @@ declare Real[] G_CurrentSkidScore;
                 // player input
                 declare Real InputSteer = Player.InputSteer;
 
-                // Handicaps
-                declare Real AdherenceCoef = Player.AdherenceCoef;
-
+                // make manialink
                 declare Text ManialinkDebugInfo;
                 ManialinkDebugInfo = """
                 <label pos="0 1" z-index="0" 
@@ -329,8 +316,26 @@ declare Real[] G_CurrentSkidScore;
 
 ***
 
+***Match_EndMap***
+***
+
+    // Destroy UI layers
+    Layers::Destroy("ManialinkDebugInfo");
+
+
+*** // Match_EndMap
+
 // this somehow prevents an EOF error?
-Void Nothing()
-{
-    // does nothing.
+Void ResetOngoingSkid(Integer _PId, Integer _Penalty){
+
+    // reset ongoing skid
+    G_CurrentSkidScore[_PId] = 0.;
+    G_IsSkidding[_PId] = False;
+
+    // deduct penalty points
+    G_Scores[_PId] -= _Penalty;
+
+    // fix negative scores
+    if (G_Scores[_PId] < 0)
+        G_Scores[_PId] = 0;
 }
