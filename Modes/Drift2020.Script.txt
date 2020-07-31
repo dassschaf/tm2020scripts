@@ -57,12 +57,8 @@
 }
 
 // ---------------------------------- //
-// Global variables
-declare Text[] G_Players; ///< used to figure out indices for G_Scores -- maybe replace with associative arrays?
-declare Integer[] G_Scores; 
-declare Boolean[] G_IsSkidding;
-declare Real[] G_CurrentSkidScore;
-declare K_PlayerInfo[] G_PlayerInfo;
+// Global variables 
+declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
 
 // ---------------------------------- //
@@ -104,19 +100,12 @@ declare K_PlayerInfo[] G_PlayerInfo;
 
 ***Match_InitMap***
 ***
-    // Map initialization
-    G_Scores.clear();
-    G_Players.clear();
-    G_IsSkidding.clear();
-    G_CurrentSkidScore.clear();
-
     // clear info array
     G_PlayerInfo.clear();
 
-    // repopulate array for player count
-    foreach (Player in Players) 
+    foreach (Player in Players)
         G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentScore = 0, IsSkidding = False, CurrentSkidScore = 0., LastTickSpeed = 0.});
-    
+   
 *** // Match_InitMap
 
 
@@ -179,7 +168,7 @@ declare K_PlayerInfo[] G_PlayerInfo;
 
                     // apply score to the actual score list if better
                     if (G_PlayerInfo[PId].CurrentScore > Player.Score.Points)
-                        Player.Scoer:points = G_PlayerInfo[PId].CurrentScore;
+                        Player.Score.Points = G_PlayerInfo[PId].CurrentScore;
                     
                     G_PlayerInfo[PId].CurrentScore = 0;
                     G_PlayerInfo[PId].CurrentSkidScore = 0.;
@@ -195,6 +184,7 @@ declare K_PlayerInfo[] G_PlayerInfo;
                 ResetOngoingSkid(PId, S_RespawnPenalty);
             }
 
+            /*  Events currently broken idk
             // Player's Vehicle collides
             case CSmModeEvent::EType::OnVehicleCollision: {
                 // on vehicle collision
@@ -209,7 +199,7 @@ declare K_PlayerInfo[] G_PlayerInfo;
 
                 // reset ongoing skid
                 ResetOngoingSkid(PId, 0);
-            }
+            }*/
         }
 
 
@@ -218,7 +208,11 @@ declare K_PlayerInfo[] G_PlayerInfo;
     // ------------------
     // Manage per-player actions
     foreach (Player in Players) {
-        declare Integer PId = GetPlayerIndexFromLogin()
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+
+        // skip loop iteration if info struct not found
+        if (PId == -1)
+            continue;
 
         // re-spawning
         if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned) {   
@@ -240,15 +234,17 @@ declare K_PlayerInfo[] G_PlayerInfo;
             declare Integer WheelsContactCount = Player.WheelsContactCount;
             declare Real Speed = Player.Speed;
 
-            // crash detection
-            if (MathLib::Abs(Speed - G_PlayerInfo[PId].LastTickSpeed) > 15)
-                ResetOngoingSkid(PId, S_CollisionPenalty);  // collision!
-            G_PlayerInfo[PId].LastTickSpeed = Speed;        // write new speed
-
-            
+                   
             // score relevant information
             declare Real SkidAngle; //<- radians, 3.14 == 180° turned skiddderidoo
             declare Real Points;
+
+            // prelimiary collision check
+            if (MathLib::Abs(G_PlayerInfo[PId].LastTickSpeed - Speed) > 12)
+                ResetOngoingSkid(PId, S_CollisionPenalty);
+
+            G_PlayerInfo[PId].LastTickSpeed = Speed;
+            
 
             // score calculation
             // check if not airborne
@@ -352,7 +348,7 @@ Void ResetOngoingSkid(Integer _PId, Integer _Penalty) {
     G_PlayerInfo[_PId].IsSkidding = False;
 
     // deduct penalty points
-    G_PlayerInfo[_PId].CurrentScore -= 500;
+    G_PlayerInfo[_PId].CurrentScore -= _Penalty;
 
     // fix negative scores
     if (G_PlayerInfo[_PId].CurrentScore < 0)
@@ -366,13 +362,14 @@ Void ResetOngoingSkid(Integer _PId, Integer _Penalty) {
  * @return          Player's Index of his data struct in G_PlayerInfo
  */
 Integer GetPlayerIndexFromLogin(Text _Login) {
+    declare Integer PId = -1;
 
     // Iterate over player info structs, return PId once matching player is found
-    for (I, 1, G_PlayerInfo.count - 1) {
+    for (I, 0, G_PlayerInfo.count - 1) {
         if (G_PlayerInfo[I].Login == _Login)
-            return I;
+            PId = I;
     }
 
     // return -1 if there is no fitting player
-    return -1;
+    return PId;
 }
