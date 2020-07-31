@@ -241,11 +241,10 @@ declare K_PlayerInfo[] G_PlayerInfo;
             declare Real Speed = Player.Speed;
 
             // crash detection
-            if (MathLib::Abs(Speed - G_PlayerInfo[PId]) > 15)
-            {
-                // collision!
-                ResetOngoingSkid(PId, S_CollisionPenalty);
-            }
+            if (MathLib::Abs(Speed - G_PlayerInfo[PId].LastTickSpeed) > 15)
+                ResetOngoingSkid(PId, S_CollisionPenalty);  // collision!
+            G_PlayerInfo[PId].LastTickSpeed = Speed;        // write new speed
+
             
             // score relevant information
             declare Real SkidAngle; //<- radians, 3.14 == 180° turned skiddderidoo
