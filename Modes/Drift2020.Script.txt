@@ -45,11 +45,23 @@
 #Const C_UploadRecord False //< idk
 
 // ---------------------------------- //
+// Structures
+#Struct K_PlayerInfo {
+    Text Login;             //< Player Login for identification
+
+    Integer CurrentScore;   //< current run's score
+    Boolean IsSkidding;     //< whether player is drifting or not
+    Real CurrentSkidScore;  //< score of the current drift, added after drift end, discarded if collision
+    Real LastTickSpeed;     //< Player.Speed from last tick, used for determining collisions
+}
+
+// ---------------------------------- //
 // Global variables
 declare Text[] G_Players; ///< used to figure out indices for G_Scores -- maybe replace with associative arrays?
 declare Integer[] G_Scores; 
 declare Boolean[] G_IsSkidding;
 declare Real[] G_CurrentSkidScore;
+declare K_PlayerInfo[] G_PlayerInfo;
 
 
 // ---------------------------------- //
@@ -102,6 +114,8 @@ declare Real[] G_CurrentSkidScore;
         G_Scores.add(0);                    ///< nth login has nth score
         G_CurrentSkidScore.add(0.0);        ///< etc.
         G_IsSkidding.add(False);
+
+        G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentScore = 0, IsSkidding = False, CurrentSkidScore = 0., LastTickSpeed = 0.});
     }
 
 *** // Match_InitMap
@@ -134,7 +148,7 @@ declare Real[] G_CurrentSkidScore;
 ***Match_StartTurn***
 ***
     // Turn start
-    ModeStatusMessage = "Current map : "^Map.MapInfo.Name;
+    yield;
 
 *** // Match_StartTurn
 
@@ -158,6 +172,8 @@ declare Real[] G_CurrentSkidScore;
                 G_Scores.add(0); ///< nth login has nth score
                 G_CurrentSkidScore.add(0.0);
                 G_IsSkidding.add(False);
+
+                G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentScore = 0, IsSkidding = False, CurrentSkidScore = 0., LastTickSpeed = 0.});
             }
 
             // Player traverses finish or lap
@@ -302,7 +318,6 @@ declare Real[] G_CurrentSkidScore;
                 Skid Points: {{{G_CurrentSkidScore[PlayerIndex]}}}
                 Total Points: {{{G_Scores[PlayerIndex]}}}
                 Current Score: {{{Player.Score.Points}}}
-                Scores: {{{Scores}}}
                 "/>
                 """;
 
@@ -338,4 +353,16 @@ Void ResetOngoingSkid(Integer _PId, Integer _Penalty){
     // fix negative scores
     if (G_Scores[_PId] < 0)
         G_Scores[_PId] = 0;
+}
+
+Integer GetPlayerIndexFromLogin(Text _Login)
+{
+    // Iterate over player info structs, return PId once matching player is found
+    for (I, 1, G_PlayerInfo.count - 1) {
+        if (G_PlayerInfo[I].Login == _Login)
+            return I;
+    }
+
+    // return -1 if there is no fitting player
+    return -1;
 }
