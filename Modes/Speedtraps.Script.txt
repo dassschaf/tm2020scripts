@@ -1,0 +1,295 @@
+/**
+ *
+ * Stunts for TrackMania 2020
+ *
+ * written by dassschaf / UD Timmy
+ *
+ */
+
+// Extends base mode script of TM 2020:
+#Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextBase.Script.txt"
+
+// ---------------------------------- //
+// Script Info
+#Const	CompatibleMapTypes	"TrackMania\\TM_Race,TM_Race"
+#Const  Version     		"0"
+#Const  ScriptName  		"Speedtraps.Script.txt"
+#Const  C_ModeName          "Speedtraps"
+#Const  Description         _("In $<$t$6F9Speedtraps$z$z$> mode, the goal is to drive with the fastest speed through all waypoints on the track. Your score is the sum of all recorded speeds at the waypoints / speedtraps. Highest score wins after the round.")
+
+// ---------------------------------- //
+// Libraries
+
+#Include "MathLib" as MathLib
+#Include "TextLib" as TextLib
+
+#Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
+#Include "Libs/Nadeo/ModeLibs/Common/Utils.Script.txt" as ModeUtils
+
+// Maniaapps
+#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/ScoresTable_Server.Script.txt" as UIModules_ScoresTable
+#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/Checkpoint_Server.Script.txt" as UIModules_Checkpoint
+#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/PauseMenuOnline_Server.Script.txt" as UIModules_PauseMenu_Online
+
+// ---------------------------------- //
+// Settings
+// #Setting S_NAME VALUE as _("TEXT")
+
+#Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
+#Setting S_ShowDebugInfo True as _("Show Debug info")
+#Setting S_RespawnPenalty 150 as _("Respawn Penalty")
+
+// ---------------------------------- //
+// Constants
+// #Const C_NAME VALUE
+#Const C_UploadRecord False
+#Const C_HudModulePath "" //< Path to the hud module
+#Const C_ManiaAppUrl "file://Media/ManiaApps/Nadeo/TMNext/TrackMania/Rounds/Rounds.Script.txt" //< Url of the mania app
+
+// ---------------------------------- //
+// Structures
+#Struct K_PlayerInfo {
+    Text Login;
+
+    Integer CurrentRunSpeed;
+}
+// ---------------------------------- //
+// Global variables
+declare K_PlayerInfo[] G_PlayerInfo; // player info array
+
+
+// ---------------------------------- //
+// Extends
+
+***Match_LogVersion***
+***
+    // register the script to the log
+    Log::RegisterScript(ScriptName, Version);
+*** // Match_LogVersion
+
+***Match_Settings***
+***
+    MB_Settings_UseDefaultHud = (C_HudModulePath == "");
+***
+
+***Match_Rules***
+***
+    // register game mode information
+    ModeInfo::SetName(C_ModeName);
+    ModeInfo::SetType(ModeInfo::C_Type_FreeForAll);
+    ModeInfo::SetRules(Description);
+    ModeInfo::SetStatusMessage(_("TYPE: Free for all\nOBJECTIVE: Set the best score on the track."));
+
+*** // Match_Rules
+
+***Match_LoadHud***
+***
+    if (C_HudModulePath != "") Hud_Load(C_HudModulePath);
+***
+
+***Match_AfterLoadHud***
+***
+    ClientManiaAppUrl = C_ManiaAppUrl;
+    Race::SortScores(Race::C_Sort_TotalPoints);
+    UIModules_ScoresTable::SetScoreMode(UIModules_ScoresTable::C_Mode_Points);
+    UIModules_PauseMenu_Online::SetHelp(Description);
+
+    // Hide SM Overlay
+    UIManager.UIAll.OverlayHideSpectatorControllers = True;
+    UIManager.UIAll.OverlayHideSpectatorInfos = True;
+    UIManager.UIAll.OverlayHideChrono = True; 
+    UIManager.UIAll.OverlayHideCountdown = True;
+***
+
+***Match_StartServer***
+***
+    // Initialize Gamemode
+    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_Normal);
+    Scores_SetSortCriteria(CSmMode::ESmScoreSortOrder::TotalPoints);
+*** // Match_StartServer
+
+
+
+***Match_InitMap***
+***
+    // clear info array
+    G_PlayerInfo.clear();
+
+    foreach (Player in Players) {
+        G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentRunSpeed = 0});
+    }
+
+*** // Match_InitMap
+
+
+
+***Match_StartMap***
+***
+    // Map actual start
+    EndTime = Now + Race::C_SpawnDuration + (S_TimeLimit*1000);
+
+    // Start players for the race
+    foreach (Player in Players) {
+        Race::Start(Player);
+    }
+
+*** // Match_StartMap
+
+
+***Match_PlayLoop***
+***
+    // ------------------
+    // Pending Events Handler
+    foreach (Event in PendingEvents) {
+        // get player index
+        declare Player <=> Event.Player;
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+
+        switch(Event.Type) {
+            // Player joins game
+            case CSmModeEvent::EType::OnPlayerAdded: {
+                G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentRunSpeed = 0});
+                Race::Start(Player);
+            }
+
+            // Player trespasses waypoint = Finish or CP
+            case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+                if (Event.IsFinish || Event.IsNewLap) {
+                    // score handling, player finished lap
+
+                    // Add speed to score
+                    AddSpeed(Player);
+
+                    if (G_PlayerInfo[PId].CurrentRunSpeed > Player.Score.Points)
+                        Player.Score.Points = G_PlayerInfo[PId].CurrentRunSpeed;
+
+                    // reset score variable
+                    G_PlayerInfo[PId].CurrentRunSpeed = 0;
+                } else {
+                    // checkpoint - Add speed to score
+                    AddSpeed(Player);
+                }
+            }
+
+            // Player demands respawn
+            case CSmModeEvent::EType::OnPlayerRequestRespawn: {
+                G_PlayerInfo[PId].CurrentRunSpeed -= S_RespawnPenalty;
+
+                if (G_PlayerInfo[PId].CurrentRunSpeed < 0)
+                    G_PlayerInfo[PId].CurrentRunSpeed = 0;
+            }
+        }
+
+
+    }
+
+    // ------------------
+    // Player phsyics debug info
+    foreach (Player in Players) {
+
+        // get player index
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+
+        // skip loop iteration if info struct not found
+        if (PId == -1)
+            continue;
+
+        // re-spawn mechanics
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
+        {
+            Race::Start(Player);
+            G_PlayerInfo[PId].CurrentRunSpeed = 0;
+        }
+
+        // score and jump calculation
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::Spawned) {	
+
+            // debug info
+            if (S_ShowDebugInfo) {
+                declare Text ManialinkDebugInfo;
+
+                declare Real InputSteer = Player.InputSteer;
+                declare Integer FlyingDuration = Player.FlyingDuration;
+                declare Real FlyingDistance = Player.FlyingDistance;
+                declare Integer WheelsContactCount = Player.WheelsContactCount;
+                declare Boolean IsTouchingGround = Player.IsTouchingGround;
+                declare Real Upwardness = Player.Upwardness;
+                
+                declare Integer PlayerScore = Player.Score.Points;
+                
+
+                ManialinkDebugInfo = """
+                <label pos="0 1" z-index="0" 
+                text="
+                Steer: {{{InputSteer}}}
+                Fly Duration: {{{FlyingDuration}}}
+                Fly Distance: {{{FlyingDistance}}}
+                On Ground? {{{IsTouchingGround}}}
+                #Wheels: {{{WheelsContactCount}}}
+                Upwardness: {{{Upwardness}}}
+
+                Run Score: {{{G_PlayerInfo[PId].CurrentRunSpeed}}}
+                Total Score: {{{Player.Score.Points}}}
+
+                "/>
+                """;
+
+                declare Text DebugManialink = ManialinkDebugInfo;
+                // get debug info for the player
+                Layers::Create("DebugManialink", DebugManialink);
+                Layers::SetType("DebugManialink", CUILayer::EUILayerType::Normal);
+                Layers::Attach("DebugManialink", Player);
+            }
+        }
+    }
+
+    // check for time over
+    if (EndTime > 0 && Now >= EndTime) {
+        MB_StopMatch();
+    }
+
+*** // Match_PlayLoop
+
+***Match_EndMap***
+***
+    // Stop match FOR REAL
+    MB_StopMatch();
+    EndTime = -1;
+
+    Race::SortScores(Race::C_Sort_TotalPoints);
+    Scores::SetDefaultLadderSort(Scores::C_Sort_MapPoints);
+    Scores::SetPlayerWinner(Scores::GetBestPlayer(Scores::C_Sort_MatchPoints));
+    
+*** // Match_EndMap
+
+// ------------------
+/** Returns Array Index for the Player Info Struct based on the Player Login
+ * @param _Login    Player's Login
+ * @return          Player's Index of his data struct in G_PlayerInfo
+ */
+ Integer GetPlayerIndexFromLogin(Text _Login) {
+    declare Integer PId = -1;
+
+    // Iterate over player info structs, return PId once matching player is found
+    for (I, 0, G_PlayerInfo.count - 1) {
+        if (G_PlayerInfo[I].Login == _Login)
+            PId = I;
+    }
+
+    // return -1 if there is no fitting player
+    return PId;
+}
+
+// ------------------
+/* Method to add the current Speed of a player to their current temporary sum
+ * @param _Player   specified Player
+ */
+Void AddSpeed(CSmPlayer _Player) {
+    declare Integer PId = GetPlayerIndexFromLogin(_Player.User.Login);
+
+    // bail out if no valid player
+    if (PId == -1) return;
+
+    // add speed to current speed
+    G_PlayerInfo[PId].CurrentRunSpeed += MathLib::NearestInteger(_Player.Speed * 3.6);
+}
