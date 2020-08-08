@@ -111,7 +111,7 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 ***Match_StartServer***
 ***
     // Initialize Gamemode
-    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_NeverGiveUp);
+    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_Normal);
     
     // Gamemode settings
     UsePvPCollisions = S_EnableCollisions;
