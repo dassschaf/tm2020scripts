@@ -19,30 +19,50 @@
 
 // ---------------------------------- //
 // Libraries
-
+//
+// Utility libraries:
 #Include "MathLib" as MathLib
 #Include "TextLib" as TextLib
 
+// Various libraries:
 #Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
+
+// UI-Modules:
+#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/ScoresTable_Server.Script.txt" as UIModules_ScoresTable
+#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/PauseMenuOnline_Server.Script.txt" as UIModules_PauseMenu_Online
 
 // ---------------------------------- //
 // Settings
 // #Setting S_NAME VALUE as _("TEXT")
 
-#Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
-#Setting S_ShowDebugInfo True as _("Show Debug info")
+#Setting S_TimeLimit            300         as _("Time Limit:")
+#Setting S_ShowDebugInfo        True        as _("Show Debug info")
+#Setting S_EnableCollisions     True        as _("Enable Collisions between cars")
+#Setting S_RespawnPenalty       500         as _("Respawn Penalty in pts")
+#Setting S_CollisionPenalty     0           as _("Collision Penalty in pts")
 
 // ---------------------------------- //
 // Constants
 // #Const C_NAME VALUE
 #Const C_UploadRecord False
+#Const C_HudModulePath "" //< Path to the hud module
+#Const C_ManiaAppUrl "file://Media/ManiaApps/Nadeo/TMNext/TrackMania/Rounds/Rounds.Script.txt" //< Url of the mania app
+#Const C_FakeUsersNb 0
 
 // ---------------------------------- //
-// Global variables
-declare Text[] G_Players; ///< used to figure out indices for G_Scores
-declare Integer[] G_Scores; 
-declare Boolean[] G_IsSkidding;
-declare Real[] G_CurrentSkidScore;
+// Structures
+#Struct K_PlayerInfo {
+    Text Login;             //< Player Login for identification
+
+    Integer CurrentScore;   //< current run's score
+    Boolean IsSkidding;     //< whether player is drifting or not
+    Real CurrentSkidScore;  //< score of the current drift, added after drift end, discarded if collision
+    Real LastTickSpeed;     //< Player.Speed from last tick, used for determining collisions
+}
+
+// ---------------------------------- //
+// Global variables 
+declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
 
 // ---------------------------------- //
@@ -54,7 +74,10 @@ declare Real[] G_CurrentSkidScore;
     Log::RegisterScript(ScriptName, Version);
 *** // Match_LogVersion
 
-
+***Match_Settings***
+***
+    MB_Settings_UseDefaultHud = (C_HudModulePath == "");
+***
 
 ***Match_Rules***
 ***
@@ -66,12 +89,33 @@ declare Real[] G_CurrentSkidScore;
 
 *** // Match_Rules
 
+***Match_LoadHud***
+***
+    if (C_HudModulePath != "") Hud_Load(C_HudModulePath);
+***
 
+***Match_AfterLoadHud***
+***
+    ClientManiaAppUrl = C_ManiaAppUrl;
+    Race::SortScores(Race::C_Sort_TotalPoints);
+    UIModules_ScoresTable::SetScoreMode(UIModules_ScoresTable::C_Mode_Points);
+    UIModules_PauseMenu_Online::SetHelp(Description);
+
+    // Hide SM Overlay
+    UIManager.UIAll.OverlayHideSpectatorControllers = True;
+    UIManager.UIAll.OverlayHideSpectatorInfos = True;
+    UIManager.UIAll.OverlayHideChrono = True; 
+    UIManager.UIAll.OverlayHideCountdown = True;
+***
 
 ***Match_StartServer***
 ***
     // Initialize Gamemode
-    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_GiveUpBeforeFirstCheckpoint);
+    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_NeverGiveUp);
+    
+    // Gamemode settings
+    UsePvPCollisions = S_EnableCollisions;
+
 
 *** // Match_StartServer
 
@@ -79,19 +123,12 @@ declare Real[] G_CurrentSkidScore;
 
 ***Match_InitMap***
 ***
-    // Map initialization
-    G_Scores.clear();
-    G_Players.clear();
-    G_IsSkidding.clear();
-    G_CurrentSkidScore.clear();
+    // clear info array
+    G_PlayerInfo.clear();
 
-    foreach (Player in Players) {
-        G_Players.add(Player.User.Login); ///< nth element
-        G_Scores.add(0); ///< nth login has nth score
-        G_CurrentSkidScore.add(0.0);
-        G_IsSkidding.add(False);
-    }
-
+    foreach (Player in Players)
+        G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentScore = 0, IsSkidding = False, CurrentSkidScore = 0., LastTickSpeed = 0.});
+   
 *** // Match_InitMap
 
 
@@ -122,7 +159,7 @@ declare Real[] G_CurrentSkidScore;
 ***Match_StartTurn***
 ***
     // Turn start
-    ModeStatusMessage = "Current map : "^Map.MapInfo.Name;
+    yield;
 
 *** // Match_StartTurn
 
@@ -136,45 +173,56 @@ declare Real[] G_CurrentSkidScore;
     // Pending Events Handler
     foreach (Event in PendingEvents) {
         declare Player <=> Event.Player;
-        declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
 
         switch (Event.Type) {
+            // Player joins game:
             case CSmModeEvent::EType::OnPlayerAdded: {
-                
-                G_Players.add(Player.User.Login); ///< nth element
-                G_Scores.add(0); ///< nth login has nth score
-                G_CurrentSkidScore.add(0.0);
-                G_IsSkidding.add(False);
+                G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentScore = 0, IsSkidding = False, CurrentSkidScore = 0., LastTickSpeed = 0.});
             }
 
+            // Player traverses finish or lap
             case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
                 if (Event.IsFinish || Event.IsNewLap) {
                     // player passed finish line, score handling here
                     
                     // add ongoing skid to score
-                    G_Scores[PlayerIndex] += MathLib::NearestInteger(G_CurrentSkidScore[PlayerIndex]);
+                    G_PlayerInfo[PId].CurrentScore += MathLib::NearestInteger(G_PlayerInfo[PId].CurrentSkidScore);
 
-                    if (G_Scores[PlayerIndex] > Player.Score.Points)
-                        Player.Score.Points = G_Scores[PlayerIndex];
+                    // apply score to the actual score list if better
+                    if (G_PlayerInfo[PId].CurrentScore > Player.Score.Points)
+                        Player.Score.Points = G_PlayerInfo[PId].CurrentScore;
                     
-                    G_Scores[PlayerIndex] = 0;
-                    G_CurrentSkidScore[PlayerIndex] = 0.;
-                    G_IsSkidding[PlayerIndex] = False;
+                    G_PlayerInfo[PId].CurrentScore = 0;
+                    G_PlayerInfo[PId].CurrentSkidScore = 0.;
+                    G_PlayerInfo[PId].IsSkidding = False;
                 }
             }
 
+            // Player requests respawn
             case CSmModeEvent::EType::OnPlayerRequestRespawn: {
                 // player respawns
 
                 // reset ongoing skid
-                G_CurrentSkidScore[PlayerIndex] = 0.;
-                G_IsSkidding[PlayerIndex] = False;
-
-                // deduct penalty points
-                G_Scores[PlayerIndex] -= 500;
-                if (G_Scores[PlayerIndex] < 0)
-                    G_Scores[PlayerIndex] = 0;
+                ResetOngoingSkid(PId, S_RespawnPenalty);
             }
+
+            /*  Events currently broken idk
+            // Player's Vehicle collides
+            case CSmModeEvent::EType::OnVehicleCollision: {
+                // on vehicle collision
+
+                // reset ongoing skid
+                ResetOngoingSkid(PId, 0);
+            }
+
+            // Player's Vehicle collides with another Vehicle
+            case CSmModeEvent::EType::OnVehicleVsVehicleCollision: {
+                // on vehicle-vehicle collision between players
+
+                // reset ongoing skid
+                ResetOngoingSkid(PId, 0);
+            }*/
         }
 
 
@@ -183,22 +231,24 @@ declare Real[] G_CurrentSkidScore;
     // ------------------
     // Manage per-player actions
     foreach (Player in Players) {
-        declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
 
-        // respawn player if unspawned
-        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
-        {   
-            // start race
+        // skip loop iteration if info struct not found
+        if (PId == -1)
+            continue;
+
+        // re-spawning
+        if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned) {   
+            // spawn player
             Race::Start(Player);
         
-            // reset skid stats
-            G_Scores[PlayerIndex] = 0;
-            G_CurrentSkidScore[PlayerIndex] = 0.;
-            G_IsSkidding[PlayerIndex] = False;
+            // reset skid and run score
+            G_PlayerInfo[PId].CurrentScore = 0;
+            ResetOngoingSkid(PId, 0);
         }
-        // score calculation
+
+        // reading out physics
         if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::Spawned) {
-            
 
             // fetch skidding information
             declare Integer SkiddingDuration = Player.SkiddingDuration;
@@ -206,46 +256,51 @@ declare Real[] G_CurrentSkidScore;
             declare Integer WheelsSkiddingCount = Player.WheelsSkiddingCount;
             declare Integer WheelsContactCount = Player.WheelsContactCount;
             declare Real Speed = Player.Speed;
-            
-            // score factors
-            // + C_DriftFactor
-            declare Real SkidAngle;
+
+                   
+            // score relevant information
+            declare Real SkidAngle; //<- radians, 3.14 == 180° turned skiddderidoo
             declare Real Points;
-            declare Real LengthBonus;
+
+            // prelimiary collision check
+            if (MathLib::Abs(G_PlayerInfo[PId].LastTickSpeed - Speed) > 12)
+                ResetOngoingSkid(PId, S_CollisionPenalty);
+
+            G_PlayerInfo[PId].LastTickSpeed = Speed;
             
 
-            // score checking
+            // score calculation
             // check if not airborne
             if (WheelsContactCount >= 2 && WheelsSkiddingCount >= 2 || WheelsContactCount == 4) {
                 SkidAngle = MathLib::Abs(MathLib::OrientedAngle(Player.Velocity, Player.AimDirection));
 
                 // Check for sufficient skid angle and speed (m/s)
-                if (SkidAngle > 0.1 && Speed > 12 || WheelsSkiddingCount > 0) {
+                // if the car's angle between velocity and aim vector is HIGHER than 135° it is not a valid drift
+                // to prevent driving backwards as meta strategy
+                if (SkidAngle > 0.1 && SkidAngle < 2.35 && Speed > 12 || WheelsSkiddingCount > 0 && SkidAngle < 2.35) {
                     // car is skidding, calculate points
-                    G_IsSkidding[PlayerIndex] = True;
-                    Points = SkidAngle*Speed*0.05;
-                    G_CurrentSkidScore[PlayerIndex] += Points;
+                    G_PlayerInfo[PId].IsSkidding = True;
+                    Points = SkidAngle * Speed * 0.05;
+                    G_PlayerInfo[PId].CurrentSkidScore += Points;
                 
                 } else {
                     // car is not skidding
-                    // add skid score to total score
-                    if (G_IsSkidding[PlayerIndex])
-                        G_Scores[PlayerIndex] += MathLib::NearestInteger(G_CurrentSkidScore[PlayerIndex]);
+                    // add skid score to run score
+                    if (G_PlayerInfo[PId].IsSkidding)
+                        G_PlayerInfo[PId].CurrentScore += MathLib::NearestInteger(G_PlayerInfo[PId].CurrentSkidScore);
                         
                     // reset values
-                    G_CurrentSkidScore[PlayerIndex] = 0.;
-                    G_IsSkidding[PlayerIndex] = False;
+                    ResetOngoingSkid(PId, 0);
                 }
     
             } else {
 
                 // car does not qualify for skidding, car airborne
-                if (G_IsSkidding[PlayerIndex])
-                    G_Scores[PlayerIndex] += MathLib::NearestInteger(G_CurrentSkidScore[PlayerIndex]);
+                if (G_PlayerInfo[PId].IsSkidding)
+                    G_PlayerInfo[PId].CurrentScore += MathLib::NearestInteger(G_PlayerInfo[PId].CurrentSkidScore);
                 
                 // reset values
-                G_CurrentSkidScore[PlayerIndex] = 0.;
-                G_IsSkidding[PlayerIndex] = False;
+                ResetOngoingSkid(PId, 0);
                 SkidAngle = 0.0;
                 Points = 0.0;
             }
@@ -264,14 +319,12 @@ declare Real[] G_CurrentSkidScore;
                 // player input
                 declare Real InputSteer = Player.InputSteer;
 
-                // Handicaps
-                declare Real AdherenceCoef = Player.AdherenceCoef;
-
+                // make manialink
                 declare Text ManialinkDebugInfo;
                 ManialinkDebugInfo = """
                 <label pos="0 1" z-index="0" 
                 text="
-                Skidding? {{{G_IsSkidding[PlayerIndex]}}}
+                Skidding? {{{G_PlayerInfo[PId].IsSkidding}}}
                 Speed: {{{Speed}}}
                 Skid Duration: {{{SkiddingDuration}}}
                 Skid Distance: {{{SkiddingDistance}}}
@@ -281,10 +334,9 @@ declare Real[] G_CurrentSkidScore;
                 Car Direction: X={{{AimX}}}, Y={{{AimY}}}, Z={{{AimZ}}}
                 Skid Angle: {{{SkidAngle}}}
                 Points: {{{Points}}}
-                Skid Points: {{{G_CurrentSkidScore[PlayerIndex]}}}
-                Total Points: {{{G_Scores[PlayerIndex]}}}
+                Skid Points: {{{G_PlayerInfo[PId].CurrentSkidScore}}}
+                Total Points: {{{G_PlayerInfo[PId].CurrentScore}}}
                 Current Score: {{{Player.Score.Points}}}
-                Scores: {{{Scores}}}
                 "/>
                 """;
 
@@ -296,8 +348,51 @@ declare Real[] G_CurrentSkidScore;
         }
     }
 
+*** // Match_PlayLoop
+
+***Match_EndMap***
 ***
 
-// this somehow prevents an EOF error?
-Void dummy() {
+    // Destroy UI layers
+    Layers::Destroy("ManialinkDebugInfo");
+
+
+*** // Match_EndMap
+
+// ------------------
+/** 
+ * @param _PId      Player's ID
+ * @param _Penalty  Penalty in pts to be deducted from Player's score
+ */
+Void ResetOngoingSkid(Integer _PId, Integer _Penalty) {
+
+    // reset ongoing skid
+    G_PlayerInfo[_PId].CurrentSkidScore = 0.;
+    G_PlayerInfo[_PId].IsSkidding = False;
+
+    // deduct penalty points
+    G_PlayerInfo[_PId].CurrentScore -= _Penalty;
+
+    // fix negative scores
+    if (G_PlayerInfo[_PId].CurrentScore < 0)
+        G_PlayerInfo[_PId].CurrentScore = 0;
+}
+
+// ------------------
+/**
+ * @param _Login    Player's Login
+ *
+ * @return          Player's Index of his data struct in G_PlayerInfo
+ */
+Integer GetPlayerIndexFromLogin(Text _Login) {
+    declare Integer PId = -1;
+
+    // Iterate over player info structs, return PId once matching player is found
+    for (I, 0, G_PlayerInfo.count - 1) {
+        if (G_PlayerInfo[I].Login == _Login)
+            PId = I;
+    }
+
+    // return -1 if there is no fitting player
+    return PId;
 }
