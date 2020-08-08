@@ -38,10 +38,13 @@
 #Const C_UploadRecord False
 
 // ---------------------------------- //
+// Structures
+#Struct K_PlayerInfo {
+    Text Login;
+}
+// ---------------------------------- //
 // Global variables
-declare Text[] G_Players; ///< used to figure out indices for other global arrays
-declare Vec3[] G_CurrentRotation;
-declare Vec3[] G_PreviousVector;
+declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
 
 // ---------------------------------- //
@@ -70,23 +73,19 @@ declare Vec3[] G_PreviousVector;
 ***Match_StartServer***
 ***
     // Initialize Gamemode
-    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_GiveUpBeforeFirstCheckpoint);
-
+    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_Normal);
+    Race::SetNetworkMode(True, False, False);
 *** // Match_StartServer
 
 
 
 ***Match_InitMap***
 ***
-    // Map initialization
-    G_Players.clear();
-    G_PreviousVector.clear();
-    G_CurrentRotation.clear();
+    // clear info array
+    G_PlayerInfo.clear();
 
     foreach (Player in Players) {
-        G_Players.add(Player.User.Login); ///< nth element
-        G_PreviousVector.add(<0., 0., 0.>);
-        G_CurrentRotation.add(<0., 0., 0.>);
+        G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login});
     }
 
 *** // Match_InitMap
@@ -119,7 +118,7 @@ declare Vec3[] G_PreviousVector;
 ***Match_StartTurn***
 ***
     // Turn start
-    ModeStatusMessage = "Current map : "^Map.MapInfo.Name;
+    yield;
 
 *** // Match_StartTurn
 
@@ -132,7 +131,17 @@ declare Vec3[] G_PreviousVector;
     foreach (Event in PendingEvents) {
         // get player index
         declare Player <=> Event.Player;
-        declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+
+        switch(Event.Type) {
+            // Player joins game
+            case CSmModeEvent::EType::OnPlayerAdded: {
+                G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login});
+                Race::Start(Player);
+            }
+
+        }
+
 
     }
 
@@ -141,36 +150,27 @@ declare Vec3[] G_PreviousVector;
     foreach (Player in Players) {
 
         // get player index
-        declare Integer PlayerIndex = G_Players.keyof(Player.User.Login);
+        declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+
+        // skip loop iteration if info struct not found
+        if (PId == -1)
+            continue;
 
         // re-spawn mechanics
         if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
         {
             Race::Start(Player);
-            G_PreviousVector[PlayerIndex] = Player.AimDirection;
-            G_CurrentRotation[PlayerIndex] = <0., 0., 0.>;
         }
 
         // score and jump calculation
         if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::Spawned) {
 
-            // checking rotation does not exactly work yet
-            declare Vec3 CurrentAim = Player.AimDirection;
-
-            declare Real XChange = MathLib::Angle(CurrentAim.X, G_PreviousVector[PlayerIndex].X);
-            declare Real YChange = MathLib::Angle(CurrentAim.Y, G_PreviousVector[PlayerIndex].Y);
-            declare Real ZChange = MathLib::Angle(CurrentAim.Z, G_PreviousVector[PlayerIndex].Z);
-
-            G_CurrentRotation[PlayerIndex].X += XChange;
-            G_CurrentRotation[PlayerIndex].Y += YChange;
-            G_CurrentRotation[PlayerIndex].Z += ZChange;
-
-            G_PreviousVector[PlayerIndex] = CurrentAim;
-
+			
 
             // debug info
             if (S_ShowDebugInfo) {
                 declare Text ManialinkDebugInfo;
+                declare Text VehicleDebugInfo;
 
                 declare Real InputSteer = Player.InputSteer;
                 declare Integer FlyingDuration = Player.FlyingDuration;
@@ -178,12 +178,43 @@ declare Vec3[] G_PreviousVector;
                 declare Integer WheelsContactCount = Player.WheelsContactCount;
                 declare Boolean IsTouchingGround = Player.IsTouchingGround;
                 declare Real Upwardness = Player.Upwardness;
-                declare Real PosX = Player.Position.X;
-                declare Real PosY = Player.Position.Y;
-                declare Real PosZ = Player.Position.Z;
+                
                 declare Real AimX = Player.AimDirection.X;
                 declare Real AimY = Player.AimDirection.Y;
                 declare Real AimZ = Player.AimDirection.Z;
+                
+                if (Player.Vehicle != Null) {
+                    declare Vehicle <=> Player.Vehicle; //CModeVehicle class
+
+                    declare Real PosX = Vehicle.Position.X;
+                    declare Real PosY = Vehicle.Position.Y;
+                    declare Real PosZ = Vehicle.Position.Z;
+
+                    declare Real LeftX = Vehicle.Left.X;
+                    declare Real LeftY = Vehicle.Left.Y;
+                    declare Real LeftZ = Vehicle.Left.Z;
+
+                    declare Real UpX = Vehicle.Up.X;
+                    declare Real UpY = Vehicle.Up.Y;
+                    declare Real UpZ = Vehicle.Up.Z;
+
+                    declare Real DirX = Vehicle.Dir.X;
+                    declare Real DirY = Vehicle.Dir.Y;
+                    declare Real DirZ = Vehicle.Dir.Z;
+
+                    VehicleDebugInfo = """
+                    <label pos="0 -2" z-index="0"
+                    text="
+                    Coordinates: X={{{PosX}}}, Y={{{PosY}}}, Z={{{PosZ}}}
+                    Left Vector: X={{{LeftX}}}, Y={{{LeftY}}}, Z={{{LeftZ}}}
+                    Up Vector: X={{{UpX}}}, Y={{{UpY}}}, Z={{{UpZ}}}
+                    Front Vector: X={{{DirX}}}, Y={{{DirY}}}, Z={{{DirZ}}}
+                    "/>
+                    """;
+                }
+                
+
+                
                 
 
 
@@ -196,24 +227,38 @@ declare Vec3[] G_PreviousVector;
                 On Ground? {{{IsTouchingGround}}}
                 #Wheels: {{{WheelsContactCount}}}
                 Upwardness: {{{Upwardness}}}
-                Coordinates: X={{{PosX}}}, Y={{{PosY}}}, Z={{{PosZ}}}
-                Aim Direction: X={{{AimX}}}, Y={{{AimY}}}, Z={{{AimZ}}}
-                Car Rotation: X={{{G_CurrentRotation[PlayerIndex].X}}}, Y={{{G_CurrentRotation[PlayerIndex].Y}}}, Z={{{G_CurrentRotation[PlayerIndex].Z}}}
+                             
                 "/>
                 """;
 
+                declare Text DebugManialink = ManialinkDebugInfo ^ VehicleDebugInfo;
                 // get debug info for the player
-                Layers::Create("ManialinkDebugInfo", ManialinkDebugInfo);
-                Layers::SetType("ManialinkDebugInfo", CUILayer::EUILayerType::Normal);
-                Layers::Attach("ManialinkDebugInfo", Player);
+                Layers::Create("DebugManialink", DebugManialink);
+                Layers::SetType("DebugManialink", CUILayer::EUILayerType::Normal);
+                Layers::Attach("DebugManialink", Player);
             }
         }
     }
 
 
 
-***
+*** // Match_PlayLoop
 
-// this somehow prevents an EOF error?
-Void dummy() {
+// ------------------
+/**
+ * @param _Login    Player's Login
+ *
+ * @return          Player's Index of his data struct in G_PlayerInfo
+ */
+ Integer GetPlayerIndexFromLogin(Text _Login) {
+    declare Integer PId = -1;
+
+    // Iterate over player info structs, return PId once matching player is found
+    for (I, 0, G_PlayerInfo.count - 1) {
+        if (G_PlayerInfo[I].Login == _Login)
+            PId = I;
+    }
+
+    // return -1 if there is no fitting player
+    return PId;
 }
