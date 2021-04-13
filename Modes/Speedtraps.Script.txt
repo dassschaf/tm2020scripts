@@ -1,13 +1,13 @@
 /**
  *
- * Stunts for TrackMania 2020
+ * Speedtraps gamemode for TrackMania 2020
  *
  * written by dassschaf / UD Timmy
  *
  */
 
-// Extends base mode script of TM 2020:
-#Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextBase.Script.txt"
+// Extends rounds mode script of TM 2020:
+#Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextRoundsBase.Script.txt"
 
 // ---------------------------------- //
 // Script Info
@@ -17,27 +17,49 @@
 #Const  C_ModeName          "Speedtraps"
 #Const  Description         _("In $<$t$6F9Speedtraps$z$z$> mode, the goal is to drive with the fastest speed through all waypoints on the track. Your score is the sum of all recorded speeds at the waypoints / speedtraps. Highest score wins after the round.")
 
+
 // ---------------------------------- //
 // Libraries
-
+// 
 #Include "MathLib" as MathLib
 #Include "TextLib" as TextLib
-
 #Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
+#Include "Libs/Nadeo/CommonLibs/Common/Semver.Script.txt" as Semver
 #Include "Libs/Nadeo/ModeLibs/Common/Utils.Script.txt" as ModeUtils
+#Include "Libs/Nadeo/TMNext/TrackMania/Menu/Constants.Script.txt" as MenuConsts
+#Include "Libs/Nadeo/TMNext/TrackMania/Modes/Rounds/StateManager.Script.txt" as StateMgr
 
 // Maniaapps
 #Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/ScoresTable_Server.Script.txt" as UIModules_ScoresTable
-#Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/Checkpoint_Server.Script.txt" as UIModules_Checkpoint
+// #Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/Checkpoint_Server.Script.txt" as UIModules_Checkpoint
 #Include "ManiaApps/Nadeo/TMxSM/Race/UIModules/PauseMenuOnline_Server.Script.txt" as UIModules_PauseMenu_Online
+
 
 // ---------------------------------- //
 // Settings
-// #Setting S_NAME VALUE as _("TEXT")
 
-#Setting S_TimeLimit 300 as _("Time Limit:") ///< as ... for server setup
+// environment setting
+#Setting S_ScriptEnvironment "development" ///< development or production
+
+// Rounds settings
+#Setting S_PointsLimit 50 as _("Points limit")
+#Setting S_FinishTimeout -1 as _("Finish timeout")
+#Setting S_RoundsPerMap -1 as _("Number of rounds per map") ///< Number of round to play on one map before going to the next one
+#Setting S_MapsPerMatch -1 as _("Number of maps per match") ///< Number of maps to play before finishing the match
+#Setting S_UseTieBreak True as _("Use tie-break")	///< Continue to play the map until the tie is broken
+#Setting S_WarmUpNb 0	as _("Number of warm up")
+#Setting S_WarmUpDuration 0 as _("Duration of one warm up")
+#Setting S_WarmUpTimeout -1 as _("Warm up timeout")
+#Const C_FakeUsersNb 0
+
+// Speedtrap relevant settings
 #Setting S_ShowDebugInfo True as _("Show Debug info")
 #Setting S_RespawnPenalty 150 as _("Respawn Penalty")
+
+// collision settings
+#Setting S_TrustClientSimu False
+#Setting S_UseCrudeExtrapolation False
+
 
 // ---------------------------------- //
 // Constants
@@ -46,6 +68,16 @@
 #Const C_HudModulePath "" //< Path to the hud module
 #Const C_ManiaAppUrl "file://Media/ManiaApps/Nadeo/TMNext/TrackMania/Rounds/Rounds.Script.txt" //< Url of the mania app
 
+#Const C_DisplayRecordGhost False
+#Const C_DisplayRecordMedal False
+#Const C_CelebrateRecordGhost True
+#Const C_CelebrateRecordMedal True
+
+#Const C_PointsLimit_NotReached 0
+#Const C_PointsLimit_Reached 1
+#Const C_PointsLimit_Tie 2
+
+
 // ---------------------------------- //
 // Structures
 #Struct K_PlayerInfo {
@@ -53,6 +85,8 @@
 
     Integer CurrentRunSpeed;
 }
+
+
 // ---------------------------------- //
 // Global variables
 declare K_PlayerInfo[] G_PlayerInfo; // player info array
@@ -63,14 +97,11 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
 ***Match_LogVersion***
 ***
+
     // register the script to the log
     Log::RegisterScript(ScriptName, Version);
-*** // Match_LogVersion
 
-***Match_Settings***
-***
-    MB_Settings_UseDefaultHud = (C_HudModulePath == "");
-***
+*** // Match_LogVersion
 
 ***Match_Rules***
 ***
@@ -85,7 +116,7 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 ***Match_LoadHud***
 ***
     if (C_HudModulePath != "") Hud_Load(C_HudModulePath);
-***
+*** // Match_LoadHud
 
 ***Match_AfterLoadHud***
 ***
@@ -99,76 +130,172 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
     UIManager.UIAll.OverlayHideSpectatorInfos = True;
     UIManager.UIAll.OverlayHideChrono = True; 
     UIManager.UIAll.OverlayHideCountdown = True;
+*** // Match_AfterLoadHud
+
+***Match_Yield***
 ***
+    foreach (Event in PendingEvents) {
+        switch (Event.Type) {
+            // Initialize players when they join the server
+            case CSmModeEvent::EType::OnPlayerAdded: {
+                declare Player <=> Event.Player;
+
+                StateMgr::InitializePlayer(Player);
+                CarRank::InitializePlayer(Player);
+            }
+        }
+    }
+
+    StateMgr::Yield();
+*** // Match_Yield
+
+***Match_InitServer***
+***
+    declare Integer Server_PointsLimit;
+    declare Integer Server_RoundsPerMap;
+    declare Integer Server_MapsPerMatch;
+*** // Match_InitServer
 
 ***Match_StartServer***
 ***
-    // Initialize Gamemode
-    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_Normal);
-    Scores_SetSortCriteria(CSmMode::ESmScoreSortOrder::TotalPoints);
+    // Initialize mode
+    UseClans = False;
+    UsePvPCollisions = False;
+    Scores::SaveInScore(Scores::C_Points_Match);
+    StateMgr::ForcePlayersStates([StateMgr::C_State_Waiting]);
+    WarmUp::SetAvailability(True);
+    Race::SetupRecord(
+        MenuConsts::C_ScopeType_Season,
+        MenuConsts::C_ScopeType_PersonalBest,
+        MenuConsts::C_GameMode_Rounds,
+        "",
+        C_UploadRecord,
+        C_DisplayRecordGhost,
+        C_DisplayRecordMedal,
+        C_CelebrateRecordGhost,
+        C_CelebrateRecordMedal
+    );
+
+    Server_PointsLimit = S_PointsLimit - 1;
+    Server_RoundsPerMap = S_RoundsPerMap - 1;
+    Server_MapsPerMatch = S_MapsPerMatch - 1;
+
+    
+    // RunSpeed layer
+    Layers::Create("RunSpeedLayer", RunSpeedLayerLayerText());
+    declare RunSpeedLayer <=> Layers::Get("RunSpeedLayer");
+    Layers::Attach("RunSpeedLayer");
+
 *** // Match_StartServer
-
-
 
 ***Match_InitMap***
 ***
-    // clear info array
-    G_PlayerInfo.clear();
-
-    foreach (Player in Players) {
-        G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentRunSpeed = 0});
-    }
+    declare Integer Map_ValidRoundsNb;
 
 *** // Match_InitMap
 
-
-
 ***Match_StartMap***
 ***
-    // Map actual start
-    EndTime = Now + Race::C_SpawnDuration + (S_TimeLimit*1000);
+    // Add bot when necessary
+    Users_SetNbFakeUsers(C_FakeUsersNb, 0);
 
-    // Start players for the race
-    foreach (Player in Players) {
-        Race::Start(Player);
-    }
+    CarRank::Reset();
 
+    // Warm up
+    //UIModules_ScoresTable::SetFooterInfo(_("Warm up"));
+    //MB_WarmUp(S_WarmUpNb, S_WarmUpDuration * 1000, S_WarmUpTimeout * 1000);
 *** // Match_StartMap
 
+***Match_StartRound***
+***
+
+    StateMgr::ForcePlayersStates([StateMgr::C_State_Playing]);
+
+***
+
+***Rounds_PlayerSpawned***
+***
+    CarRank::ThrottleUpdate(CarRank::C_SortCriteria_CurrentRace);
+***
 
 ***Match_PlayLoop***
 ***
     // ------------------
     // Pending Events Handler
     foreach (Event in PendingEvents) {
+
         // get player index
         declare Player <=> Event.Player;
         declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+        
+        // Add player to list if missing
+        if (PId == -1) {
+            G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentRunSpeed = 0});
+            PId = GetPlayerIndexFromLogin(Player.User.Login);
+        }
 
         switch(Event.Type) {
             // Player joins game
             case CSmModeEvent::EType::OnPlayerAdded: {
                 G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentRunSpeed = 0});
+
                 Race::Start(Player);
+
+                // UI things:
+                declare UI <=> UIManager.GetUI(Player);
+
+                declare netwrite Integer Net_RunSpeed for UI = 0;
+                declare netwrite Boolean Net_RunDone for UI = False;
+
             }
 
             // Player trespasses waypoint = Finish or CP
             case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
-                if (Event.IsFinish || Event.IsNewLap) {
+                if (Event.IsNewLap) {
+                    // Add speed to score
+                    AddRunSpeed(Player);
+
+                    // UI things:
+                    declare UI <=> UIManager.GetUI(Player);
+
+                    declare netwrite Integer Net_RunSpeed for UI = GetRunSpeed(Player);
+                    declare netwrite Boolean Net_RunDone for UI = False;
+                }
+
+                if (Event.IsFinish) {
                     // score handling, player finished lap
 
                     // Add speed to score
-                    AddSpeed(Player);
+                    AddRunSpeed(Player);
 
+                    // do UI things:
+                    declare UI <=> UIManager.GetUI(Player);
+                    declare netwrite Integer Net_RunSpeed for UI = GetRunSpeed(Player);
+                    declare netwrite Boolean Net_RunDone for UI = True;
+
+                    // Set points to rounds score
                     if (G_PlayerInfo[PId].CurrentRunSpeed > Player.Score.Points)
                         Player.Score.Points = G_PlayerInfo[PId].CurrentRunSpeed;
 
                     // reset score variable
                     G_PlayerInfo[PId].CurrentRunSpeed = 0;
+
+                    CarRank::ThrottleUpdate(CarRank::C_SortCriteria_CurrentRace);
+
+                    ComputeLatestRaceScores();
+                    Race::SortScores(Race::C_Sort_RoundPoints);
+                    
+                    // Start the countdown if it's the first player to finish
+                    if (EndTime <= 0) {
+                        EndTime = GetFinishTimeout();
+                    }
+
                 } else {
                     // checkpoint - Add speed to score
-                    AddSpeed(Player);
+                    AddRunSpeed(Player);
                 }
+
+                
             }
 
             // Player demands respawn
@@ -187,18 +314,24 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
     // Player phsyics debug info
     foreach (Player in Players) {
 
-        // get player index
+        // get player index and UI
         declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+        declare UI <=> UIManager.GetUI(Player);
 
-        // skip loop iteration if info struct not found
-        if (PId == -1)
-            continue;
+        // Add player to list if missing
+        if (PId == -1) {
+            G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentRunSpeed = 0});
+            PId = GetPlayerIndexFromLogin(Player.User.Login);
+        }
 
         // re-spawn mechanics
         if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned)
         {
             Race::Start(Player);
             G_PlayerInfo[PId].CurrentRunSpeed = 0;
+
+            declare netwrite Integer Net_RunSpeed for UI = GetRunSpeed(Player);
+            declare netwrite Boolean Net_RunDone for UI = False;
         }
 
         // score and jump calculation
@@ -250,17 +383,56 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
 *** // Match_PlayLoop
 
+***Match_EndRound***
+***
+    Race::StopSkipOutroAll();
+    EndTime = -1;
+    StateMgr::ForcePlayersStates([StateMgr::C_State_Waiting]);
+    CarRank::Update(CarRank::C_SortCriteria_CurrentRace);
+
+    if (Semver::Compare(XmlRpc::GetApiVersion(), ">=", "2.1.1")) {
+        Scores::XmlRpc_SendScores(Scores::C_Section_PreEndRound, "");
+    }
+
+    if (Round_ForceEndRound || Round_SkipPauseRound || Round_Skipped) {
+        // Cancel points
+        foreach (Score in Scores) {
+            Scores::SetPlayerRoundPoints(Score, 0);
+        }
+        // Do not launch the forced end round sequence after a pause
+        if (!Round_SkipPauseRound) {
+            ForcedEndRoundSequence();
+        }
+    } else {
+
+        Map_ValidRoundsNb += 1;
+        // Get the last round points
+        ComputeLatestRaceScores();
+        Race::SortScores(Race::C_Sort_RoundPoints);
+        UIManager.UIAll.ScoreTableVisibility = CUIConfig::EVisibility::ForcedVisible;
+        UIManager.UIAll.UISequence = CUIConfig::EUISequence::EndRound;
+        MB_Sleep(3000);
+
+        // Add them to the total scores
+        ComputeScores();
+        Race::SortScores(Race::C_Sort_TotalPoints);
+        MB_Sleep(3000);
+        UIManager.UIAll.ScoreTableVisibility = CUIConfig::EVisibility::Normal;
+        UIManager.UIAll.UISequence = CUIConfig::EUISequence::Playing;
+        
+        if (MapIsOver(Map_ValidRoundsNb)) MB_StopMap();
+    }
+*** // Match_EndRound
+
 ***Match_EndMap***
 ***
-    // Stop match FOR REAL
-    MB_StopMatch();
-    EndTime = -1;
+    if (MatchIsOver()) MB_StopMatch();
+
+    if (!MB_MapIsRunning() && MB_MatchIsRunning()) MB_SkipPodiumSequence();
 
     Race::SortScores(Race::C_Sort_TotalPoints);
-    Scores::SetDefaultLadderSort(Scores::C_Sort_MapPoints);
     Scores::SetPlayerWinner(Scores::GetBestPlayer(Scores::C_Sort_MatchPoints));
-    
-*** // Match_EndMap
+***
 
 // ------------------
 /** Returns Array Index for the Player Info Struct based on the Player Login
@@ -284,12 +456,174 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 /* Method to add the current Speed of a player to their current temporary sum
  * @param _Player   specified Player
  */
-Void AddSpeed(CSmPlayer _Player) {
+Void AddRunSpeed(CSmPlayer _Player) {
     declare Integer PId = GetPlayerIndexFromLogin(_Player.User.Login);
 
-    // bail out if no valid player
-    if (PId == -1) return;
+    // Add player if missing
+    if (PId == -1) {
+        G_PlayerInfo.add(K_PlayerInfo{Login = _Player.User.Login, CurrentRunSpeed = 0});
+        PId = GetPlayerIndexFromLogin(_Player.User.Login);
+    }
 
     // add speed to current speed
     G_PlayerInfo[PId].CurrentRunSpeed += MathLib::NearestInteger(_Player.Speed * 3.6);
+}
+
+// ------------------
+/* Method get the current speed of a player in their current run
+ * @param _Player   specified Player
+ */
+Integer GetRunSpeed(CSmPlayer _Player) {
+    declare Integer PId = GetPlayerIndexFromLogin(_Player.User.Login);
+
+    // Add player if missing
+    if (PId == -1) {
+        G_PlayerInfo.add(K_PlayerInfo{Login = _Player.User.Login, CurrentRunSpeed = 0});
+        PId = GetPlayerIndexFromLogin(_Player.User.Login);
+    }
+
+    // add speed to current speed
+    return G_PlayerInfo[PId].CurrentRunSpeed;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/** Get the time left to the players to finish the round after the first player
+ *
+ *	@return 		The time left in ms
+ */
+Integer GetFinishTimeout() {
+	declare FinishTimeout = 0;
+	
+	if (S_FinishTimeout >= 0) {
+		FinishTimeout = S_FinishTimeout * 1000;
+	} else {
+		FinishTimeout = 5000;
+		if (Map.TMObjective_IsLapRace && Race::GetLapsNb() > 0 && Map.TMObjective_NbLaps > 0) {
+			FinishTimeout += ((Map.TMObjective_AuthorTime / Map.TMObjective_NbLaps) * Race::GetLapsNb()) / 6;
+		} else {
+			FinishTimeout += Map.TMObjective_AuthorTime / 6;
+		}
+	}
+	
+	return Now + FinishTimeout;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/// Compute the latest race scores
+Void ComputeLatestRaceScores() {
+	Race::SortScores(Race::C_Sort_RoundPoints);
+	
+	// Points distributed between all players
+	declare I = 0;
+	foreach (Score in Scores) {
+		if (Scores::GetPlayerPrevRaceTime(Score) > 0) {
+			declare Points = 0;
+			declare PointsRepartition = PointsRepartition::GetPointsRepartition();
+			if (PointsRepartition.count > 0) {
+				if (PointsRepartition.existskey(I)) {
+					Points = PointsRepartition[I];
+				} else {
+					Points = PointsRepartition[PointsRepartition.count - 1];
+				}
+			}
+			Scores::SetPlayerRoundPoints(Score, Points);
+			I += 1;
+		} else {
+			Scores::SetPlayerRoundPoints(Score, 0);
+		}
+	}
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/// Compute the map scores
+Void ComputeScores() {
+	Scores::EndRound();
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/** Check if the points limit was reached
+ *
+ *	@return														C_PointsLimit_Reached if the points limit is reached
+ *																		C_PointsLimit_Tie if there is a tie
+ *																		C_PointsLimit_NotReached if the points limit is not reached
+ */
+Integer PointsLimitReached() {
+	declare MaxScore = -1;
+	declare Tie = False;
+	foreach (Score in Scores) {
+		declare Points = Scores::GetPlayerMatchPoints(Score);
+		if (Points > MaxScore) {
+			MaxScore = Points;
+			Tie = False;
+		} else if (Points == MaxScore) {
+			Tie = True;
+		}
+	}
+	
+	if (S_UseTieBreak && Tie) return C_PointsLimit_Tie; //< There is a tie and it is not allowed
+	if (S_PointsLimit > 0 && MaxScore >= S_PointsLimit) return C_PointsLimit_Reached; //< There is a points limit and it is reached
+	return C_PointsLimit_NotReached; //< There is no points limit or the points limit is not reached
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/** Check if we should go to the next map
+ *
+ *	@param	_ValidRoundsNb						Number of valid rounds played
+ *
+ *	@return		True if it is the case, false otherwise
+ */
+Boolean MapIsOver(Integer _ValidRoundsNb) {
+	declare Integer PointsLimitReached = PointsLimitReached();
+	
+	if (PointsLimitReached == C_PointsLimit_Reached) return True; //< There is a points limit and it is reached
+	if (S_RoundsPerMap > 0 && _ValidRoundsNb >= S_RoundsPerMap) return True; //< There is a rounds limit and it is reached
+	
+	return False;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/** Check if we should go to the next match
+ *
+ *	@return		True if it is the case, false otherwise
+ */
+Boolean MatchIsOver() {
+	declare Integer PointsLimitReached = PointsLimitReached();
+	
+	if (S_MapsPerMatch > 1 && PointsLimitReached == C_PointsLimit_Tie) return False; //< Ties are allowed if the map was skipped and match is played on one map only
+	if (PointsLimitReached == C_PointsLimit_Reached) return True; //< There is a points limit and it is reached
+	if (S_MapsPerMatch > 1 && MB_GetMapCount() >= S_MapsPerMatch) return True; //< There is a maps limit and it is reached
+	if (S_MapsPerMatch <= 1) return True;
+	
+	return False;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// UI Manialinks
+//
+
+// ~~~~~~~
+Text RunSpeedLayerLayerText() {
+    return """
+    <label pos="0 70" z-index="35" text="0" style="TextButtonMedium" id="Label_RunSpeed" scale="0.90" halign="center" valign="center" textsize="4" textcolor="FFF" />
+    <script><!--
+        #Include "TextLib" as TextLib
+
+        main() {
+            declare netread Integer Net_RunSpeed for UI;
+            declare netread Boolean Net_RunDone for UI;
+
+            declare Label_RunSpeed <=> (Page.GetFirstChild("Label_RunSpeed") as CMlLabel);
+
+            Label_RunSpeed.Show();
+            
+            while (True) {
+                yield;
+                Label_RunSpeed.SetText(TextLib::ToText(Net_RunSpeed)); ///< Score    
+
+                if (Net_RunDone == True)                               ///< Color
+                    Label_RunSpeed.TextColor = <0., 1., 0.>;
+            }
+        }
+    --></script>
+    """;
 }
