@@ -109,10 +109,7 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 ***
 
 ***Match_StartServer***
-***
-    // Initialize Gamemode
-    Race::SetRespawnBehaviour(Race::C_RespawnBehaviour_Normal);
-    
+***    
     // Gamemode settings
     UsePvPCollisions = S_EnableCollisions;
 
@@ -128,7 +125,10 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
     foreach (Player in Players)
         G_PlayerInfo.add(K_PlayerInfo{Login = Player.User.Login, CurrentScore = 0, IsSkidding = False, CurrentSkidScore = 0., LastTickSpeed = 0.});
-   
+        
+    declare Integer Map_TimeLimit;
+    declare Integer Map_MapStartTime;
+    
 *** // Match_InitMap
 
 
@@ -136,7 +136,10 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 ***Match_StartMap***
 ***
     // Map actual start
-
+    StartTime = Now + Race::C_SpawnDuration;
+    Map_TimeLimit = S_TimeLimit;
+    Map_MapStartTime = StartTime;
+    SetTimeLimit(StartTime, S_TimeLimit);
 
     // Start players for the race
     foreach (Player in Players) {
@@ -348,6 +351,32 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
         }
     }
 
+    // Spawn players
+    if (PlayersNbDead > 0) { //< Check for unspawned players only if at least one player is unspawned
+        foreach (Player in Players) {
+            declare Integer PId = GetPlayerIndexFromLogin(Player.User.Login);
+            if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned && Race::IsReadyToStart(Player)) {
+                // reset skid and run score
+                G_PlayerInfo[PId].CurrentScore = 0;
+                ResetOngoingSkid(PId, 0);
+
+                // respawn player
+                Race::Start(Player);
+            }
+        }
+    }
+
+    // Update the map duration setting
+    if (Map_TimeLimit != S_TimeLimit) {
+        Map_TimeLimit = S_TimeLimit;
+        SetTimeLimit(StartTime, S_TimeLimit);
+    }
+
+    // End the map when time limit is reached
+    if (EndTime > 0 && Now >= EndTime) {
+        MB_StopMatch();
+    }
+
 *** // Match_PlayLoop
 
 ***Match_EndMap***
@@ -355,6 +384,22 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
 
     // Destroy UI layers
     Layers::Destroy("ManialinkDebugInfo");
+
+    MB_StopMatch();
+
+    EndTime = -1;
+    Match_MatchDuration = ML::Max(0, Now - Map_MapStartTime);
+    StateMgr::ForcePlayersStates([StateMgr::C_State_Waiting]);
+    Race::EnableIntroDuringMatch(False);
+
+    Race::SortScores(Scores::C_Sort_MatchPoints);
+    TrophyRanking::UpdateUsersRank();
+    CarRank::Update(CarRank::C_SortCriteria_BestRace);
+    Scores::SetDefaultLadderSort(Scores::C_Sort_MatchPoints);
+    Scores::SetPlayerWinner(Scores::GetBestPlayer(Scores::C_Sort_MatchPoints));
+    Race::StopLosers();
+    MB_Sleep(1000);
+    Race::StopSkipOutroAll();
 
 
 *** // Match_EndMap
@@ -395,4 +440,18 @@ Integer GetPlayerIndexFromLogin(Text _Login) {
 
     // return -1 if there is no fitting player
     return PId;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+/** Update the time limit
+ *
+ *	@param	_StartTime								The starting time of the map
+ *	@param	_NewTimeLimit							The time limit before going to the next map
+ */
+Void SetTimeLimit(Integer _StartTime, Integer _NewTimeLimit) {
+	if (_NewTimeLimit <= 0) {
+		EndTime = -1;
+	} else {
+		EndTime = _StartTime + (S_TimeLimit * 1000);
+	}
 }
