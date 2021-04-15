@@ -1,7 +1,5 @@
 /**
- *
  * Speedtraps gamemode for TrackMania 2020
- *
  * written by dassschaf / UD Timmy
  *
  */
@@ -43,6 +41,7 @@
 
 // Rounds settings
 #Setting S_FinishTimeout -1 as _("Finish timeout (-1 for automatic)")
+#Setting S_TimeoutFactor 6 as _("Timeout factor (Timeout = 10s + (AT/factor)")
 #Setting S_RoundsPerMap 2 as _("Number of rounds per map") ///< Number of round to play on one map before going to the next one
 #Setting S_MapsPerMatch -1 as _("Number of maps per match (-1 to disable)") ///< Number of maps to play before finishing the match
 #Setting S_UseTieBreak True as _("Use Tiebreaker")	///< Continue to play the map until the tie is broken
@@ -163,16 +162,14 @@
     
     // RunSpeed layer
     Layers::Create("RunSpeedLayer", RunSpeedLayerLayerText());
-    Layers::SetType("RunSpeedLayer", CUILayer::EUILayerType::Normal);
-    declare RunSpeedLayer <=> Layers::Get("RunSpeedLayer");
     Layers::Attach("RunSpeedLayer");
+    Layers::SetType("RunSpeedLayer", CUILayer::EUILayerType::Normal);
 
     // Debuginfo layer
     if (S_ShowDebugInfo) {
         Layers::Create("DebugInfoLayer", DebugInfoLayerLayerText());
-        Layers::SetType("DebugInfoLayer", CUILayer::EUILayerType::Normal);
-        declare DebugInfoLayer <=> Layers::Get("DebugInfoLayer");
         Layers::Attach("DebugInfoLayer");
+        Layers::SetType("DebugInfoLayer", CUILayer::EUILayerType::Normal);
     }
 
 *** // Match_StartServer
@@ -223,9 +220,14 @@
 
 ***Match_PlayLoop***
 ***
+    declare RacePendingEvents = Race::GetPendingEvents();
+
     // ------------------
     // Pending Events Handler
-    foreach (Event in PendingEvents) {
+    foreach (Event in RacePendingEvents) {
+
+        // get original event & validate race event
+        Race::ValidEvent(Event);
 
         // get player index
         declare Player <=> Event.Player;
@@ -236,8 +238,8 @@
 
         switch(Event.Type) {
             // Player joins game
-            case CSmModeEvent::EType::OnPlayerAdded: {
-                Race::Start(Player);
+            case Events::C_Type_StartLine: {
+                //Race::Start(Player);
 
                 // UI things:
                 declare UI <=> UIManager.GetUI(Player);
@@ -253,23 +255,10 @@
             }
 
             // Player trespasses waypoint = Finish or CP
-            case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+            case Events::C_Type_Waypoint: {
                 declare Integer Speed = MathLib::NearestInteger(Player.Speed * 3.6);
 
-                if (Event.GiveUp) {
-                    // Reset score
-                    Scores::SetPlayerRoundPoints(Player.Score, 0);
-                    Race::SortScores(Race::C_Sort_RoundPoints);
-
-                    // UI things:
-                    declare UI <=> UIManager.GetUI(Player);
-
-                    declare netwrite Integer Net_RunScore for UI;
-                    declare netwrite Boolean Net_IsRunDone for UI;
-                    Net_RunScore = Scores::GetPlayerRoundPoints(Player.Score);
-                    Net_IsRunDone = False;
-
-                } else if (Event.IsNewLap) {
+                if (Event.IsEndLap) {
                     // Add speed to score
                     Scores::AddPlayerRoundPoints(Player.Score, Speed);
                     Race::SortScores(Race::C_Sort_RoundPoints);
@@ -285,7 +274,10 @@
                     declare netwrite Boolean Net_ShowRunScore for UI;
                     Net_ShowRunScore = True;
 
-                } else if (Event.IsFinish) {
+                    // Update player timings
+                    declare Better = Scores::UpdatePlayerBestLapIfBetter(Event.Player);
+
+                } else if (Event.IsEndRace) {
                     // score handling, player finished race
 
                     // Add speed to score
@@ -305,6 +297,11 @@
 
                     CarRank::ThrottleUpdate(CarRank::C_SortCriteria_CurrentRace);
                     Race::Wait(Player);
+
+                    // Update player timings
+                    declare BetterRace = Scores::UpdatePlayerBestRaceIfBetter(Player);
+                    declare BetterLap = Scores::UpdatePlayerBestLapIfBetter(Player);
+                    Scores::UpdatePlayerPrevRace(Player);
                     
                     // Start the countdown if it's the first player to finish
                     if (EndTime <= 0) {
@@ -333,11 +330,11 @@
             }
 
             // Player demands respawn
-            case CSmModeEvent::EType::OnPlayerRequestRespawn: {
+            case Events::C_Type_Respawn: {
                 // Apply respawn penalty
                 Scores::RemovePlayerRoundPoints(Player.Score, S_RespawnPenalty);
 
-                if (Event.GiveUp) {
+                if (Event.IsGiveUp) {
                     Scores::SetPlayerRoundPoints(Player.Score, 0);
                     Race::Wait(Player);
                 }
@@ -353,7 +350,29 @@
                 Net_IsRunDone = False;
 
             }
+
+            case Events::C_Type_GiveUp: {
+                // Reset score
+                Scores::SetPlayerRoundPoints(Player.Score, 0);
+                Race::SortScores(Race::C_Sort_RoundPoints);
+
+                Race::Wait(Player);
+
+                // UI things:
+                declare UI <=> UIManager.GetUI(Player);
+
+                declare netwrite Integer Net_RunScore for UI;
+                declare netwrite Boolean Net_IsRunDone for UI;
+                Net_RunScore = Scores::GetPlayerRoundPoints(Player.Score);
+                Net_IsRunDone = False;
+            }
         }
+    }
+
+    // Manage mode events
+    foreach (Event in PendingEvents) {
+        if (Event.HasBeenPassed || Event.HasBeenDiscarded) continue;
+        Events::Invalid(Event);
     }
 
     // ------------------
@@ -506,9 +525,9 @@ Integer GetFinishTimeout() {
 	} else {
 		FinishTimeout = 5000;
 		if (Map.TMObjective_IsLapRace && Race::GetLapsNb() > 0 && Map.TMObjective_NbLaps > 0) {
-			FinishTimeout += ((Map.TMObjective_AuthorTime / Map.TMObjective_NbLaps) * Race::GetLapsNb()) / 6;
+			FinishTimeout += ((Map.TMObjective_AuthorTime / Map.TMObjective_NbLaps) * Race::GetLapsNb()) / S_TimeoutFactor;
 		} else {
-			FinishTimeout += Map.TMObjective_AuthorTime / 6;
+			FinishTimeout += Map.TMObjective_AuthorTime / S_TimeoutFactor;
 		}
 	}
 	
@@ -569,7 +588,8 @@ Boolean Match_IsTied() {
 // ~~~~~~~
 Text RunSpeedLayerLayerText() {
     return """
-    <label text="0" style="TextButtonMedium" id="Label_RunSpeed" scale="1.50" textsize="4" textcolor="FFF" valign="center" halign="center" pos="0 50"/>
+<manialink version="3" name="Speedtraps:RunSpeedLayer">
+    <label pos="0 30" text="0" style="TextButtonMedium" id="Label_RunSpeed" scale="1.50" textsize="4" textcolor="FFF" valign="center" halign="center"/>
     <script><!--
         #Include "TextLib" as TextLib
 
@@ -597,13 +617,15 @@ Text RunSpeedLayerLayerText() {
             }
         }
     --></script>
+</manialink>
     """;
 }
 
 // ~~~~~~~
 Text DebugInfoLayerLayerText() {
     return """
-    <label id="Label_DebugInfo" pos="0 1"/>
+<manialink version="3" name="Speedtraps:DebugInfoLayer">
+    <label id="Label_DebugInfo" pos="80 80"/>
     <script><!--
         #Include "TextLib" as TextLib
 
@@ -627,5 +649,6 @@ Text DebugInfoLayerLayerText() {
             }
         }
     --></script>
+</manialink>
     """;
 }
