@@ -21,9 +21,12 @@
 // 
 #Include "MathLib" as MathLib
 #Include "TextLib" as TextLib
-#Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
-#Include "Libs/Nadeo/CommonLibs/Common/Semver.Script.txt" as Semver
+/*
+These are not required to run. Omitting them fixes a script warning.
 #Include "Libs/Nadeo/ModeLibs/Common/Utils.Script.txt" as ModeUtils
+#Include "Libs/Nadeo/ModeLibs/Legacy/Layers2.Script.txt" as Layers
+*/
+#Include "Libs/Nadeo/CommonLibs/Common/Semver.Script.txt" as Semver
 #Include "Libs/Nadeo/TMNext/TrackMania/Menu/Constants.Script.txt" as MenuConsts
 #Include "Libs/Nadeo/TMNext/TrackMania/Modes/Rounds/StateManager.Script.txt" as StateMgr
 
@@ -625,7 +628,8 @@ Boolean Match_IsTied() {
 Text RunSpeedLayerLayerText() {
     return """
 <manialink version="3" name="Speedtraps:RunSpeedLayer">
-    <label pos="0 30" text="0" style="TextButtonMedium" id="Label_RunSpeed" scale="1.50" textsize="4" textcolor="FFF" valign="center" halign="center"/>
+    <label pos="0 80" text="0" style="TextButtonMedium" id="Label_RunSpeed" scale="1.50" textsize="4" textcolor="FFF" valign="center" halign="center" size="20 10" textemboss="1"/>
+<quad id="Quad_LabelBG" pos="0 80" z-index="0" size="35 15" bgcolor="FFF" opacity="1" halign="center" valign="center" style="UICommon128_1" substyle="BgDialog"/>
     <script><!--
         #Include "TextLib" as TextLib
 
@@ -635,20 +639,24 @@ Text RunSpeedLayerLayerText() {
             declare netread Boolean Net_ShowRunScore for UI;
 
             declare Label_RunSpeed <=> (Page.GetFirstChild("Label_RunSpeed") as CMlLabel);
+	    declare Quad_LabelBG <=> (Page.GetFirstChild("Quad_LabelBG") as CMlQuad);
 
             Label_RunSpeed.Show();
+	    Quad_LabelBG.Opacity = 1.0;
             
             while (True) {
                 yield;
 
                 if (Net_ShowRunScore) {
-                    Label_RunSpeed.SetText(TextLib::ToText(Net_RunScore)); ///< Score    
+                    Label_RunSpeed.SetText(TextLib::ToText(Net_RunScore)); ///< Score  
+		    Quad_LabelBG.Opacity = 1.0;  
 
                     if (Net_IsRunDone == True)  Label_RunSpeed.TextColor = <0., 1., 0.>;
                     if (Net_IsRunDone == False) Label_RunSpeed.TextColor = <1., 1., 1.>;
 
                 } else {
                     Label_RunSpeed.SetText("");
+		    Quad_LabelBG.Opacity = 0.0;
                 }
             }
         }
