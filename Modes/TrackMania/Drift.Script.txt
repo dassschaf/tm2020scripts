@@ -13,8 +13,8 @@
 // Script Info
 #Const	CompatibleMapTypes	"TrackMania\\TM_Race,TM_Race"
 #Const  Version     		"0"
-#Const  ScriptName  		"Drift2020.Script.txt"
-#Const  C_ModeName          "Drift2020"
+#Const  ScriptName  		"Drift.Script.txt"
+#Const  C_ModeName          "Drift"
 #Const  Description         _("In $<$Drift mode$>, the goal is to make as much points as possible through drifting over the track. The higher your angle of attack and speed are, the higher the points you gain. The winner is the player with most points at the end of the round.")
 
 // ---------------------------------- //
@@ -196,6 +196,7 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
                     if (G_PlayerInfo[PId].CurrentScore > Player.Score.Points)
                         Player.Score.Points = G_PlayerInfo[PId].CurrentScore;
                     
+                    // reset the score variables
                     G_PlayerInfo[PId].CurrentScore = 0;
                     G_PlayerInfo[PId].CurrentSkidScore = 0.;
                     G_PlayerInfo[PId].IsSkidding = False;
@@ -209,23 +210,6 @@ declare K_PlayerInfo[] G_PlayerInfo; // player info array
                 // reset ongoing skid
                 ResetOngoingSkid(PId, S_RespawnPenalty);
             }
-
-            /*  Events currently broken idk
-            // Player's Vehicle collides
-            case CSmModeEvent::EType::OnVehicleCollision: {
-                // on vehicle collision
-
-                // reset ongoing skid
-                ResetOngoingSkid(PId, 0);
-            }
-
-            // Player's Vehicle collides with another Vehicle
-            case CSmModeEvent::EType::OnVehicleVsVehicleCollision: {
-                // on vehicle-vehicle collision between players
-
-                // reset ongoing skid
-                ResetOngoingSkid(PId, 0);
-            }*/
         }
 
 
