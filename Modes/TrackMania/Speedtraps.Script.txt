@@ -284,6 +284,7 @@ These are not required to run. Omitting them fixes a script warning.
                 if (Event.IsEndLap) {
                     // Add speed to score
                     Scores::AddPlayerRoundPoints(Player.Score, Speed);
+                    UIManager.GetUI(Event.Player).QueueMessage(1500, 2, CUIConfig::EMessageDisplay::Big, "+" ^ Speed, CUIConfig::EUISound::Silence, 0);
                     Race::SortScores(Race::C_Sort_RoundPoints);
 
                     // UI things:
@@ -302,6 +303,7 @@ These are not required to run. Omitting them fixes a script warning.
 
                     // Add speed to score
                     Scores::AddPlayerRoundPoints(Player.Score, Speed);
+                    UIManager.GetUI(Event.Player).QueueMessage(1500, 2, CUIConfig::EMessageDisplay::Big, "+" ^ Speed, CUIConfig::EUISound::Silence, 0);
                     Race::SortScores(Race::C_Sort_RoundPoints);
 
                     // do UI things:
@@ -328,6 +330,7 @@ These are not required to run. Omitting them fixes a script warning.
             
                     // Add speed to score
                     Scores::AddPlayerRoundPoints(Player.Score, Speed);
+                    UIManager.GetUI(Event.Player).QueueMessage(1500, 2, CUIConfig::EMessageDisplay::Big, "+" ^ Speed, CUIConfig::EUISound::Silence, 0);
                     Race::SortScores(Race::C_Sort_RoundPoints);
 
                     // UI things:
@@ -348,6 +351,7 @@ These are not required to run. Omitting them fixes a script warning.
             case Events::C_Type_Respawn: {
                 // Apply respawn penalty
                 Scores::RemovePlayerRoundPoints(Player.Score, S_RespawnPenalty);
+                UIManager.GetUI(Event.Player).QueueMessage(1500, 2, CUIConfig::EMessageDisplay::Big, "-" ^ S_RespawnPenalty, CUIConfig::EUISound::Silence, 0);
 
                 Race::SortScores(Race::C_Sort_RoundPoints);
 
@@ -627,36 +631,41 @@ Boolean Match_IsTied() {
 // ~~~~~~~
 Text RunSpeedLayerLayerText() {
     return """
-<manialink version="3" name="Speedtraps:RunSpeedLayer">
+    <manialink version="3" name="Speedtraps:RunSpeedLayer">
+    <frame id="Frame_SpeedTraps" hidden="0">
     <label pos="0 80" text="0" style="TextButtonMedium" id="Label_RunSpeed" scale="1.50" textsize="4" textcolor="FFF" valign="center" halign="center" size="20 10" textemboss="1"/>
-<quad id="Quad_LabelBG" pos="0 80" z-index="0" size="35 15" bgcolor="FFF" opacity="1" halign="center" valign="center" style="UICommon128_1" substyle="BgDialog"/>
+    <label pos="150 -70" text="Speed" style="TextButtonMedium" scale="1.50" textsize="3" textcolor="FFF" halign="right" size="17.7 5.66" textemboss="1" valign="bottom"/>
+    <label pos="150 -70" text="0" style="TextButtonMedium" id="Label_Speed" scale="1.50" textsize="9" textcolor="FFF" halign="right" size="27.6 10.1" textemboss="1" textfont="GameFontExtraBold" valign="top"/>
+    <quad pos="0 80" z-index="0" size="35 15" bgcolor="FFF" opacity="1" halign="center" valign="center" style="UICommon128_1" substyle="BgDialog"/>
+    </frame>
     <script><!--
         #Include "TextLib" as TextLib
+        #Include "MathLib" as MathLib
 
         main() {
             declare netread Integer Net_RunScore for UI;
             declare netread Boolean Net_IsRunDone for UI;
             declare netread Boolean Net_ShowRunScore for UI;
 
+            declare Frame_SpeedTraps <=> (Page.GetFirstChild("Frame_SpeedTraps") as CMlFrame);
             declare Label_RunSpeed <=> (Page.GetFirstChild("Label_RunSpeed") as CMlLabel);
-	    declare Quad_LabelBG <=> (Page.GetFirstChild("Quad_LabelBG") as CMlQuad);
+            declare Label_Speed <=> (Page.GetFirstChild("Label_Speed") as CMlLabel);
 
-            Label_RunSpeed.Show();
-	    Quad_LabelBG.Opacity = 1.0;
+        Frame_SpeedTraps.Show();
             
             while (True) {
                 yield;
 
-                if (Net_ShowRunScore) {
-                    Label_RunSpeed.SetText(TextLib::ToText(Net_RunScore)); ///< Score  
-		    Quad_LabelBG.Opacity = 1.0;  
+                if (Net_ShowRunScore && GUIPlayer != Null) {
+                    Label_RunSpeed.SetText(TextLib::ToText(GUIPlayer.Score.RoundPoints)); ///< Score  
+                    Label_Speed.SetText(TextLib::ToText(MathLib::NearestInteger(GUIPlayer.Speed * 3.6))); ///< Speed
+		            Frame_SpeedTraps.Show();
 
                     if (Net_IsRunDone == True)  Label_RunSpeed.TextColor = <0., 1., 0.>;
                     if (Net_IsRunDone == False) Label_RunSpeed.TextColor = <1., 1., 1.>;
 
                 } else {
-                    Label_RunSpeed.SetText("");
-		    Quad_LabelBG.Opacity = 0.0;
+                    Frame_SpeedTraps.Hide();
                 }
             }
         }
